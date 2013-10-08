@@ -12,11 +12,61 @@
 
 import eve
 import hashlib
-from flask import request
+from flask import make_response, abort as flask_abort, request
 from flask import current_app as app
 from datetime import datetime, timedelta
 from bson.json_util import dumps
 import werkzeug.exceptions
+from werkzeug.exceptions import default_exceptions, HTTPException
+import json
+
+
+class JSONHTTPException(HTTPException):
+    """A base class for HTTP exceptions with ``Content-Type:
+    application/json``.
+
+    The ``description`` attribute of this class must set to a string (*not* an
+    HTML string) which describes the error.
+
+    """
+
+    def get_body(self, environ):
+        """Overrides :meth:`werkzeug.exceptions.HTTPException.get_body` to
+        return the description of this error in JSON format instead of HTML.
+
+        """
+        return json.dumps(dict(description=self.get_description(environ)))
+
+    def get_headers(self, environ):
+        """Returns a list of headers including ``Content-Type:
+        application/json``.
+
+        """
+        return [('Content-Type', 'application/json')]
+
+
+
+def abort(status_code, body=None, headers={}):
+    """
+    Content negiate the error response.
+
+    """
+
+    if 'text/html' in request.headers.get("Accept", ""):
+        error_cls = HTTPException
+    else:
+        error_cls = JSONHTTPException
+
+    class_name = error_cls.__name__
+    bases = [error_cls]
+    attributes = {'code': status_code}
+
+    if status_code in default_exceptions:
+        # Mixin the Werkzeug exception
+        bases.insert(0, default_exceptions[status_code])
+
+    error_cls = type(class_name, tuple(bases), attributes)
+    flask_abort(make_response(error_cls(body), status_code, headers))
 
 
 class Config(object):
@@ -191,37 +241,28 @@ def document_link(resource, document_id):
     .. versionchanged:: 0.0.3
        Now returning a JSON link
     """
-    return {'title': '%s' % config.DOMAIN[resource]['item_title'],
-            'href': '%s/%s' % (resource_uri(resource), document_id)}
+    return { 'href': '%s/%s' % (resource_uri(resource), document_id)}
 
 
 def home_link():
     """ Returns a link to the API entry point/home page.
 
-    .. versionchanged:: 0.1.1
-       Handle the case of SERVER_NAME being None.
-
     .. versionchanged:: 0.0.3
        Now returning a JSON link.
     """
-    server_name = config.SERVER_NAME if config.SERVER_NAME else ''
     return {'title': 'home',
-            'href': '%s%s' % (server_name, api_prefix())}
+            'href': '%s%s' % (config.SERVER_NAME, api_prefix())}
 
 
 def resource_uri(resource):
     """ Returns the absolute URI to a resource.
-
-    .. versionchanged:: 0.1.1
-       Handle the case of SERVER_NAME being None.
 
     .. versionchanged:: 0.1.0
        No more trailing slashes in links.
 
     :param resource: the resource name.
     """
-    server_name = config.SERVER_NAME if config.SERVER_NAME else ''
-    return '%s%s/%s' % (server_name, api_prefix(),
+    return '%s%s/%s' % (config.SERVER_NAME, api_prefix(),
                         config.URLS[resource])
 
 
