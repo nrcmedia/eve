@@ -190,6 +190,7 @@ def _best_mime():
             renders[mime_type] = mime['renderer']
     best_match = request.accept_mimetypes.best_match(supported) or \
         _DEFAULT_MIME
+    best_match = _DEFAULT_MIME
     return best_match, renders[best_match]
 
 
