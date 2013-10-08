@@ -21,9 +21,40 @@ from eve.utils import parse_request, document_etag, document_link, \
     debug_error_message
 
 
+def _find_objectids(document, schema):
+
+    keys = dict(single=[], multiple=[])
+
+    for key, val in schema.iteritems():
+        if val['type'] == 'objectid':
+            keys['single'].append({'key': key, 'resource': val['data_relation']['collection']})
+        elif val['type'] == 'list':
+            if val['schema']['type'] == 'objectid':
+                keys['multiple'].append({'key': key, 'resource': val['schema']['data_relation']['collection']})
+
+    return keys
+
+
+def _add_links(document, resource):
+    document.setdefault('_links', {})
+    schema = config.DOMAIN[resource]['schema']
+    keys = _find_objectids(document, schema)
+    links = {}
+
+    for rel in keys['single']:
+        if document.get(rel['key']):
+            links[rel['key']] = document_link(rel['resource'], document[rel['key']])
+
+    for rel in keys['multiple']:
+        if document.get(rel['key']):
+            links[rel['key']] = [document_link(rel['resource'], r) for r in document[rel['key']]]
+
+    document['_links'].update(links)
+
+
 @ratelimit()
 @requires_auth('resource')
-def get(resource):
+def get(resource, req=None):
     """Retrieves the resource documents that match the current request.
 
     :param resource: the name of the resource.
@@ -62,7 +93,9 @@ def get(resource):
     response = {}
     last_update = epoch()
 
-    req = parse_request(resource)
+    if req is None:
+        req = parse_request(resource)
+
     cursor = app.data.find(resource, req)
 
     for document in cursor:
@@ -78,8 +111,9 @@ def get(resource):
             document['_links'] = {'self':
                                   document_link(resource,
                                                 document[config.ID_FIELD])}
-
+        _add_links(document, resource)
         documents.append(document)
+
 
     _resolve_embedded_documents(resource, req, documents)
 
@@ -103,8 +137,8 @@ def get(resource):
 
         if config.DOMAIN[resource]['hateoas']:
             response['_items'] = documents
-            response['_links'] = _pagination_links(resource, req,
-                                                   cursor.count())
+            #response['_links'] = _pagination_links(resource, req,
+            #                                      cursor.count())
         else:
             response = documents
 
@@ -178,6 +212,9 @@ def getitem(resource, **lookup):
                 'parent': home_link()
             }
 
+        _add_links(document, resource)
+        _resolve_embedded_documents(resource, req, [document])
+
         # notify registered callback functions. Please note that, should the
         # functions modify the document, last_modified and etag  won't be
         # updated to reflect the changes (they always reflect the documents
@@ -233,25 +270,49 @@ def _resolve_embedded_documents(resource, req, documents):
         # For each field, is the field allowed to be embedded?
         # Pick out fields that have a `data_relation` where `embeddable=True`
         enabled_embedded_fields = []
+
         for field in embedded_fields:
             # Reject bogus field names
             if field in config.DOMAIN[resource]['schema']:
                 field_definition = config.DOMAIN[resource]['schema'][field]
-                if 'data_relation' in field_definition and \
-                        field_definition['data_relation'].get('embeddable'):
-                    # or could raise 400 here
-                    enabled_embedded_fields.append(field)
+                if ('data_relation' in field_definition and \
+                    field_definition['data_relation'].get('embeddable')) or \
+                    ('schema' in field_definition and \
+                    'data_relation' in field_definition['schema'] and \
+                    field_definition['schema']['data_relation'].get('embeddable')):
+
+                        enabled_embedded_fields.append(field)
+
+        memoize = {}
 
         for document in documents:
             for field in enabled_embedded_fields:
-                field_definition = config.DOMAIN[resource]['schema'][field]
                 # Retrieve and serialize the requested document
-                embedded_doc = app.data.find_one(
-                    field_definition['data_relation']['collection'],
-                    **{config.ID_FIELD: document[field]}
-                )
+                if not document.get(field):
+                    continue
+
+                field_definition = config.DOMAIN[resource]['schema'][field]
+
+                if type(document[field]) is list:
+                    key = "".join([str(_id) for _id in document[field]])
+                    if not memoize.get(key):
+                        memoize[key] = [doc for doc in app.data.find_list_of_ids(
+                            field_definition['schema']['data_relation']['collection'],
+                            document[field]
+                        )]
+                    embedded_doc = memoize[key]
+                else:
+                    if not memoize.get(document[field]):
+                        memoize[document[field]] = app.data.find_one(
+                            field_definition['data_relation']['collection'],
+                            **{config.ID_FIELD: document[field]}
+                        )
+                    embedded_doc = memoize[document[field]]
+
                 if embedded_doc:
-                    document[field] = embedded_doc
+                    document.setdefault("_embedded", {})
+                    document['_embedded'][field] = embedded_doc
+                    del document[field]
 
 
 def _pagination_links(resource, req, documents_count):
