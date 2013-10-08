@@ -35,28 +35,28 @@ def get_document(resource, **lookup):
       Pass current resource to ``parse_request``, allowing for proper
       processing of new configuration settings: `filters`, `sorting`, `paging`.
     """
-    req = parse_request(resource)
+    #req = parse_request(resource)
     document = app.data.find_one(resource, **lookup)
     if document:
 
-        if not req.if_match:
-            # we don't allow editing unless the client provides an etag
-            # for the document
-            abort(403, description=debug_error_message(
-                'An etag must be provided to edit a document'
-            ))
+        #if not req.if_match:
+        #    # we don't allow editing unless the client provides an etag
+        #    # for the document
+        #    abort(403, description=debug_error_message(
+        #        'An etag must be provided to edit a document'
+        #    ))
 
         # ensure the retrieved document has LAST_UPDATED and DATE_CREATED,
         # eventually with same default values as in GET.
         document[config.LAST_UPDATED] = last_updated(document)
         document[config.DATE_CREATED] = date_created(document)
 
-        if req.if_match != document_etag(document):
-            # client and server etags must match, or we don't allow editing
-            # (ensures that client's version of the document is up to date)
-            abort(412, description=debug_error_message(
-                'Client and server etags don\'t match'
-            ))
+        #if req.if_match != document_etag(document):
+        #    # client and server etags must match, or we don't allow editing
+        #    # (ensures that client's version of the document is up to date)
+        #    abort(412, description=debug_error_message(
+        #        'Client and server etags don\'t match'
+        #    ))
 
     return document
 
