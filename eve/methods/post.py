@@ -17,7 +17,9 @@ from eve.utils import document_link, config, document_etag
 from eve.auth import requires_auth
 from eve.validation import ValidationError
 from eve.methods.common import parse, payload, ratelimit
+from eve.methods.get import find_objectid_fields
 
+# curl -X POST -H 'Accept: application/json' --user admin:secret 'http://127.0.0.1:5000/articles' -d 'object={"title": "joepie", "producer": "henkie"}'
 
 @ratelimit()
 @requires_auth('resource')
@@ -88,21 +90,119 @@ def post(resource, payl=None):
        JSON links. Superflous ``response`` container removed.
     """
 
+    resource_def = app.config['DOMAIN'][resource]
+
+    if payl is None:
+        payl = payload()
+
+    # build response payload
+    response = {}
+    success, fields, ids = _post(resource, payl)
+
+    if not success:
+        response['status'] = config.STATUS_ERR
+        response['issues'] = fields
+    else:
+        doc = fields[0]
+        response['status'] = config.STATUS_OK
+        response[config.LAST_UPDATED] = doc[config.LAST_UPDATED]
+        response['etag'] = document_etag(doc)
+
+        if resource_def['hateoas']:
+            response['_links'] = \
+                {'self': document_link(resource,
+                                   response[config.ID_FIELD])}
+
+        # add any additional field that might be needed
+        allowed_fields = [x for x in resource_def['extra_response_fields']
+                          if x in doc.keys()]
+        for field in allowed_fields:
+            response[field] = doc[field]
+
+    return response, None, None, 200
+
+
+def get_or_create(resource, attrs):
+    """ Try to update a doc when an id or unique key is present, otherwise
+    try and create it """
+
+    if all(p in attrs for p in uniques(resource)):
+        doc = app.data.find_one(resource, **attrs)
+        if doc:
+            app.data.update({'_id': doc['_id'], })
+
+    pass
+
+
+def _post_resource(resource, payl):
     date_utc = datetime.utcnow().replace(microsecond=0)
     resource_def = app.config['DOMAIN'][resource]
     schema = resource_def['schema']
+    related = find_objectid_fields(schema)
+
+    validator = app.validator(schema, resource)
+    issues = []
+
+    document = parse(value, resource)
+    try:
+        validation = validator.validate(document)
+        if validation:
+            # validation is successful
+            document[config.LAST_UPDATED] = document[config.DATE_CREATED] = date_utc
+
+            # if 'user-restricted resource access' is enabled
+            # and there's an Auth request active,
+            # inject the auth_field into the document
+            auth_field = resource_def['auth_field']
+            if app.auth and auth_field:
+                request_auth_value = app.auth.request_auth_value
+                if request_auth_value and request.authorization:
+                    document[auth_field] = request_auth_value
+        else:
+            issues.extend(validator.errors)
+    except ValidationError as e:
+        raise e
+    except Exception as e:
+        # most likely a problem with the incoming payload, report back to
+        # the client as if it was a validation issue
+        issues.append(str(e))
+
+    if len(issues) == 0:
+        _ids = app.data.insert(resource, [document])
+        document[config.ID_FIELD] = _ids[0]
+
+
+
+
+def _post(resource, payl):
+    date_utc = datetime.utcnow().replace(microsecond=0)
+    resource_def = app.config['DOMAIN'][resource]
+    schema = resource_def['schema']
+    related = find_objectid_fields(schema)
+
+
     validator = app.validator(schema, resource)
     documents = []
     issues = []
 
     # validation, and additional fields
-    if payl is None:
-        payl = payload()
+
     for key, value in payl.items():
         document = []
         doc_issues = []
         try:
             document = parse(value, resource)
+            if '_embedded' in document and document['_embedded']:
+                for key, embed in document['_embedded'].items():
+                    res = related[key]['resource']
+                    success, resp, ids = _post(res, {'_': embed})
+                    if success:
+                        document[key] = ids
+                    else:
+                        doc_issues.append(resp)
+
+            print schema
+            print document
             validation = validator.validate(document)
             if validation:
                 # validation is successful
@@ -122,9 +222,11 @@ def post(resource, payl=None):
                 doc_issues.extend(validator.errors)
         except ValidationError as e:
             raise e
-        except Exception as e:
-            # most likely a problem with the incoming payload, report back to
-            # the client as if it was a validation issue
+        #except Exception as e:
+        #    #print e
+        #    1/0
+        #    # most likely a problem with the incoming payload, report back to
+        #    # the client as if it was a validation issue
             doc_issues.append(str(e))
 
         issues.append(doc_issues)
@@ -138,31 +240,9 @@ def post(resource, payl=None):
         getattr(app, "on_insert_%s" % resource)(documents)
         # bulk insert
         ids = app.data.insert(resource, documents)
+        for d in documents:
+            d['_id'] = ids.pop(0)
+        return True, documents, ids
+    else:
+        return False, issues, None
 
-    # build response payload
-    response = {}
-    for key, doc_issues in zip(payl.keys(), issues):
-        response_item = {}
-        if len(doc_issues):
-            response_item['status'] = config.STATUS_ERR
-            response_item['issues'] = doc_issues
-        else:
-            response_item['status'] = config.STATUS_OK
-            response_item[config.ID_FIELD] = ids.pop(0)
-            document = documents.pop(0)
-            response_item[config.LAST_UPDATED] = document[config.LAST_UPDATED]
-            response_item['etag'] = document_etag(document)
-            if resource_def['hateoas']:
-                response_item['_links'] = \
-                    {'self': document_link(resource,
-                                           response_item[config.ID_FIELD])}
-
-            # add any additional field that might be needed
-            allowed_fields = [x for x in resource_def['extra_response_fields']
-                              if x in document.keys()]
-            for field in allowed_fields:
-                response_item[field] = document[field]
-
-        response[key] = response_item
-
-    return response, None, None, 200

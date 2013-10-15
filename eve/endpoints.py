@@ -35,6 +35,7 @@ def collections_endpoint(url):
     .. versionchanged:: 0.0.2
         Support for DELETE resource method.
     """
+    print url
 
     resource = config.RESOURCES[url]
     response = None

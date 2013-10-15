@@ -36,12 +36,15 @@ class Validator(Validator):
        Support for 'transparent_schema_rules' introduced with Cerberus 0.0.3,
        which allows for insertion of 'default' values in POST requests.
     """
-    def __init__(self, schema, resource=None):
+    def __init__(self, schema, db=None, resource=None):
         self.resource = resource
         self.object_id = None
+        self.db = db
+        # _embedded should be allowed
+        schema['_embedded'] = {'type': 'dict'}
         super(Validator, self).__init__(schema, transparent_schema_rules=True)
-        if resource:
-            self.allow_unknown = config.DOMAIN[resource]['allow_unknown']
+        #if resource:
+        #    self.allow_unknown = config.DOMAIN[resource]['allow_unknown']
 
     def validate_update(self, document, object_id):
         """ Validate method to be invoked when performing an update, not an
@@ -77,8 +80,8 @@ class Validator(Validator):
         if unique:
             query = {field: value}
             if self.object_id:
-                query[config.ID_FIELD] = {'$ne': ObjectId(self.object_id)}
-            if app.data.find_one(self.resource, **query):
+                query['_id'] = {'$ne': ObjectId(self.object_id)}
+            if self.db[self.resource].find_one(**query):
                 self._error("value '%s' for field '%s' not unique" %
                             (value, field))
 
@@ -96,11 +99,14 @@ class Validator(Validator):
         .. versionadded: 0.0.5
         """
         query = {data_relation['field']: value}
-        if not app.data.find_one(data_relation['collection'], **query):
-                self._error("value '%s' for field '%s' must exist in "
-                            "collection '%s', field '%s'" %
-                            (value, field, data_relation['collection'],
-                             data_relation['field']))
+        cursor = self.db[data_relation['collection']].find(query, {}).limit(1)
+        exists = next(cursor, None)
+        if not exists:
+            self._error("value '%s' for field '%s' must exist in "
+                        "collection '%s', field '%s'" %
+                        (value, field, data_relation['collection'],
+                         data_relation['field']))
+
 
     def _validate_type_objectid(self, field, value):
         """ Enables validation for `objectid` schema attribute.
@@ -110,5 +116,6 @@ class Validator(Validator):
         :param field: field name.
         :param value: field value.
         """
-        if not re.match('[a-f0-9]{24}', value):
-            self._error(ERROR_BAD_TYPE % (field, 'ObjectId'))
+        if not isinstance(value, ObjectId):
+            if not re.match('[a-f0-9]{24}', value):
+                self._error(ERROR_BAD_TYPE % (field, 'ObjectId'))

@@ -16,9 +16,11 @@ import simplejson as json
 from werkzeug import utils
 from functools import wraps
 from bson.objectid import ObjectId
-from eve.methods.common import get_rate_limit
 from eve.utils import date_to_str, config, request_method
 from flask import make_response, request, Response, current_app as app
+from flask.signals import Namespace
+
+signals = Namespace()
 
 # mapping between supported mime types and render functions.
 _MIME_TYPES = [{'mime': ('application/json',), 'renderer': 'render_json'},
@@ -49,10 +51,12 @@ def raise_event(f):
             event_name = 'on_' + method
             resource = args[0] if args else None
             # general hook
-            getattr(app, event_name)(resource, request, r)
-            if resource:
-                # resource hook
-                getattr(app, event_name + '_' + resource)(request, r)
+            # @TODO don't attach them to the app object, use Flasks signals
+            # http://flask.pocoo.org/docs/signals/
+            #signals
+            #if resource:
+            #    # resource hook
+            #    getattr(app, event_name + '_' + resource)(request, r)
         return r
     return decorated
 
@@ -168,7 +172,7 @@ def _prepare_response(resource, dct, last_modified=None, etag=None,
         resp.headers.add('Access-Control-Allow-Max-Age', 21600)
 
     # Rate-Limiting
-    limit = get_rate_limit()
+    limit = None
     if limit and limit.send_x_headers:
         resp.headers.add('X-RateLimit-Remaining', str(limit.remaining))
         resp.headers.add('X-RateLimit-Limit', str(limit.limit))
@@ -199,6 +203,7 @@ class APIEncoder(json.JSONEncoder):
     This is needed to address the encoding of special values.
     """
     def default(self, obj):
+        print type(obj)
         if isinstance(obj, datetime.datetime):
             # convert any datetime to RFC 1123 format
             return date_to_str(obj)

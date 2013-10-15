@@ -21,24 +21,23 @@ from eve.utils import parse_request, document_etag, document_link, \
     debug_error_message
 
 
-def _find_objectids(document, schema):
+def find_objectid_fields(schema):
+    """ Find object id fields in schema """
 
-    keys = dict(single=[], multiple=[])
-
+    related_keys = {}
     for key, val in schema.iteritems():
         if val['type'] == 'objectid':
-            keys['single'].append({'key': key, 'resource': val['data_relation']['collection']})
-        elif val['type'] == 'list':
-            if val['schema']['type'] == 'objectid':
-                keys['multiple'].append({'key': key, 'resource': val['schema']['data_relation']['collection']})
+            related_keys[key] = {'resource': val['data_relation']['collection'], 'multi': False}
+        elif val['type'] == 'list' and val['schema']['type'] == 'objectid':
+            related_keys[key] = {'resource': val['schema']['data_relation']['collection'], 'multi': True}
 
-    return keys
+    return related_keys
 
 
 def _add_links(document, resource):
     document.setdefault('_links', {})
     schema = config.DOMAIN[resource]['schema']
-    keys = _find_objectids(document, schema)
+    keys = find_objectid_fields(schema)
     links = {}
 
     for rel in keys['single']:

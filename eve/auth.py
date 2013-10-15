@@ -36,7 +36,7 @@ def requires_auth(endpoint_class):
             elif endpoint_class == 'home':
                 public = app.config['PUBLIC_METHODS'] + ['OPTIONS']
                 roles = app.config['ALLOWED_ROLES']
-            if app.auth and request.method not in public:
+            if None and request.method not in public:
                 if not app.auth.authorized(roles, resource_name,
                                            request.method):
                     return app.auth.authenticate()
