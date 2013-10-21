@@ -19,7 +19,6 @@ from flask import current_app as app
 from cerberus import Validator
 from cerberus.errors import ERROR_BAD_TYPE
 
-
 class Validator(Validator):
     """ A cerberus.Validator subclass adding the `unique` contraint to
     Cerberus standard validation.
@@ -37,11 +36,10 @@ class Validator(Validator):
        which allows for insertion of 'default' values in POST requests.
     """
     def __init__(self, schema, db=None, resource=None):
+
         self.resource = resource
         self.object_id = None
-        self.db = db
-        # _embedded should be allowed
-        schema['_embedded'] = {'type': 'dict'}
+        self.db = app.extensions['pymongo']['MONGO'][1]
         super(Validator, self).__init__(schema, transparent_schema_rules=True)
         #if resource:
         #    self.allow_unknown = config.DOMAIN[resource]['allow_unknown']
@@ -81,7 +79,8 @@ class Validator(Validator):
             query = {field: value}
             if self.object_id:
                 query['_id'] = {'$ne': ObjectId(self.object_id)}
-            if self.db[self.resource].find_one(**query):
+
+            if self.db[self.resource].find_one(query):
                 self._error("value '%s' for field '%s' not unique" %
                             (value, field))
 

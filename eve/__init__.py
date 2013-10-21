@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
 
 """
-    Eve
-    ~~~
-
-    An out-of-the-box REST Web API that's as dangerous as you want it to be.
-
+       ~~~
+    An out-of-the-box REST Web API that's as dangerous as you want o be.
     :copyright: (c) 2013 by Nicola Iarocci.
     :license: BSD, see LICENSE for more details.
 
@@ -46,4 +43,4 @@ STATUS_OK = "OK"
 STATUS_ERR = "ERR"
 
 # must be the last line (will raise W402 on pyflakes)
-from eve.flaskapp import Eve, Api # noqa
+from eve.flaskapp import Api # noqa
