@@ -37,6 +37,9 @@ pre_insert = signalizer.signal('pre-insert')
 Context = namedtuple('Context', 'limit offset query embedded projection')
 logger = logging.getLogger('mongrest')
 
+
+
+
 def str_to_date(string):
     """ Converts a RFC-1123 string to the corresponding datetime value.
 
@@ -52,7 +55,7 @@ def document_link(resource, doc_id=None):
     return url
 
 def _find_objectid_fields(schema):
-    """ Find object id fields in schema """
+    """ Find object id fields, or reference fields in schema """
 
     related_keys = {}
     for key, val in schema.iteritems():
@@ -66,7 +69,6 @@ def _find_objectid_fields(schema):
             'multi': True, 'schema': app.config['DOMAIN'][val['schema']['data_relation']['collection']]['schema']}
 
     return related_keys
-
 
 def _find_date_fields(schema):
     """ Find date keys"""
@@ -230,7 +232,7 @@ def jsonify(doc):
 
 
 def _pagination_links(resource):
-    """Returns the appropriate set of resource links depending on the
+    """ Returns the appropriate set of resource links depending on the
     current page and the total number of documents returned by the query.
     """
 
@@ -266,15 +268,15 @@ class Responsy(object):
 
 
 def check_auth(username, password):
-    """This function is called to check if a username /
+    """ This function is called to check if a username /
     password combination is valid.
     """
     return username == 'crn' and password == 'crn'
 
 
 def authenticate():
-    """Sends a 401 response that enables basic auth"""
-    abort(401, 'Please login with your proper credentials')
+    """ Sends a 401 response that enables basic auth"""
+    abort(401, "Please use the proper credentials", {'WWW-Authenticate':'Basic realm="Login Required"'})
 
 
 def requires_auth(f):
@@ -329,6 +331,7 @@ class ApiView(MethodView):
     def pre_insert(sender, **kwargs):
         """ Gets called just before inserting the document in the database,
         useful for adding timestamps """
+
         doc = kwargs.get('doc')
         if doc:
             _add_timers(doc)
@@ -353,7 +356,7 @@ class ApiView(MethodView):
 
             documents = []
             for doc in cursor:
-                self._finalize_doc(doc)
+                _finalize_doc(doc, self.reference_keys, self.resource)
                 documents.append(doc)
 
             # Embedded documents
@@ -377,7 +380,7 @@ class ApiView(MethodView):
             doc = self.collection.find_one({'_id': _id})
 
             if doc:
-                self._finalize_doc(doc)
+                _finalize_doc(doc, self.reference_keys, self.resource)
                 if none_match and none_match.replace('"','') == doc.get('etag'):
                     abort(304)
 
@@ -436,7 +439,7 @@ class ApiView(MethodView):
 
         # Add the id to the payload
         doc['_id'] = _id
-        self._finalize_doc(doc)
+        _finalize_doc(doc, self.reference_keys, self.resource)
         resp = jsonify(doc)
         # Add Location header
         resp.headers.set('Location', document_link(self.resource, _id))
@@ -463,13 +466,6 @@ class ApiView(MethodView):
             resp = jsonify({})
             resp.headers.set('Content-Location', document_link(self.resource, kwargs['_id']))
             return resp, 204
-
-    def _finalize_doc(self, doc):
-        """ Adds link and etag to the document """
-
-        doc['etag'] = document_etag(doc)
-        _add_links(doc, self.reference_keys, self.resource)
-
 
     def _parse(self, payload):
         """ Parse incoming request bodies """
@@ -499,7 +495,7 @@ def get_or_create(collection, db, resource, payload):
     """ Helper for embedded inserts, tries to retreive doc from mongo when all unique fields are
     present, tries to insert a new doc when nothing is found or not all uniques are present
 
-    Aborts on validate erros """
+    Aborts on validation erros """
 
     schema = app.config['DOMAIN'][resource]['schema']
     uniques = [key for key in schema if schema[key].get('unique')]
@@ -520,6 +516,14 @@ def get_or_create(collection, db, resource, payload):
         return collection.find_one({'_id': _id}, {})['_id']
 
     abort('400', {'errors': v.errors})
+
+
+def _finalize_doc(doc, reference_keys, resource):
+    """ Adds link and etag to the document """
+
+    doc['etag'] = document_etag(doc)
+    _add_links(doc, reference_keys, resource)
+
 
 
 def _add_timers(doc):
