@@ -28,6 +28,7 @@ from bson.errors import InvalidId
 from dateutil.tz import tzlocal
 from blinker import Namespace
 import logging
+import re
 from pymongo.errors import PyMongoError
 
 signalizer = Namespace()
@@ -245,6 +246,27 @@ def _pagination_links(resource):
     return links
 
 
+def _prep_query(query):
+    """ Prepare mongodb query """
+    if query is None:
+        return None
+
+    def convert_datetimes(q):
+        for key, val in q.iteritems():
+            if isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}", val):
+                q[key] = datetime.strptime(val, "%Y-%m-%d")
+            if isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", val):
+                q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M")
+            elif isinstance(val, dict):
+                convert_datetimes(val)
+
+    convert_datetimes(query)
+
+    print query
+
+    return query
+
+
 def get_context():
     """ Retreive the URL parameters from the current request context """
 
@@ -256,12 +278,13 @@ def get_context():
         return Context(
             int_or_none(args.get('limit')) or 25,
             int_or_none(args.get('offset')) or 0,
-            dict_or_none(args.get('q')),
+            _prep_query(dict_or_none(args.get('q'))),
             dict_or_none(args.get('embedded')),
             dict_or_none(args.get('projection'))
         )
     except ValueError:
         abort(400, '{limit} and {offset} must be integers')
+
 
 class Responsy(object):
     pass
@@ -388,6 +411,9 @@ class ApiView(MethodView):
                 if doc.get('updated_at'):
                     resp.headers.set('Last-Modified',
                         doc['updated_at'].strftime("%a, %d %b %Y %H:%M:%S %Z"))
+
+                if doc.get('etag'):
+                    resp.headers.set('ETag', doc['etag'])
 
                 return resp, 200
 
