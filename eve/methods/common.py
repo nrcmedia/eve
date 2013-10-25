@@ -268,10 +268,9 @@ def _prep_query(query):
                 q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S")
             elif isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}", val):
                 q[key] = datetime.strptime(val, "%Y-%m-%d")
+        return q
 
-    convert_datetimes(query)
-    return query
-
+    return convert_datetimes(query)
 
 def get_context():
     """ Retreive the URL parameters from the current request context """
