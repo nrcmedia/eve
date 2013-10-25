@@ -526,9 +526,7 @@ def get_or_create(collection, db, resource, payload):
     schema = app.config['DOMAIN'][resource]['schema']
     uniques = [key for key in schema if schema[key].get('unique')]
 
-    print all(k in payload for k in uniques)
-
-    if all(k in payload for k in uniques):
+    if uniques and all(k in payload for k in uniques):
         uniq_values = dict( (k, v) for (k, v) in payload.iteritems()
                         if k in uniques)
         doc = collection.find_one(uniq_values, {})
