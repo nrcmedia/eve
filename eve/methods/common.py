@@ -34,11 +34,8 @@ from pymongo.errors import PyMongoError
 signalizer = Namespace()
 pre_insert = signalizer.signal('pre-insert')
 # Signal subscription
-
 Context = namedtuple('Context', 'limit offset query embedded projection')
-
 logger = logging.getLogger('mongrest')
-
 
 def str_to_date(string):
     """ Converts a RFC-1123 string to the corresponding datetime value.
@@ -137,11 +134,17 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
 
                     enabled_embedded_fields.append(field)
 
+
+    print 'deze hier:', enabled_embedded_fields
+
     memoize = {}
 
     for document in documents:
         for field in enabled_embedded_fields:
             # Retrieve and serialize the requested document
+
+            print document.get(field)
+
             if not document.get(field):
                 continue
 
@@ -229,7 +232,8 @@ def jsonify(doc):
        and not request.is_xhr:
         indent = 2
     return app.response_class(json.dumps(doc,
-        indent=indent, cls=APIEncoder), mimetype='application/json')
+        indent=indent, cls=APIEncoder), mimetype='application/json',
+        content_type='application/json')
 
 
 def _pagination_links(resource):
@@ -377,14 +381,14 @@ class ApiView(MethodView):
             cursor = self.collection.find(*find_args)\
                         .skip(params.offset).limit(params.limit)
 
-            documents = []
-            for doc in cursor:
-                _finalize_doc(doc, self.reference_keys, self.resource)
-                documents.append(doc)
-
+            documents = list(cursor)
             # Embedded documents
             if params.embedded:
                 _resolve_embedded_documents(self.resource, self.db, params.embedded, documents)
+
+            for doc in documents:
+                _finalize_doc(doc, self.reference_keys, self.resource)
+
             # Add paginated links
             links = _pagination_links(self.resource)
 
@@ -426,7 +430,8 @@ class ApiView(MethodView):
         payload = request.get_json(force=True)
         doc = self._parse(payload)
 
-        # Pluck '_embedded' from the doc before passing it on to the validator.
+        # Pluck '_embedded' from the doc before passing the doc
+        # to the validator.
         embedded = doc.pop('_embedded', None)
 
         validated = self.validator.validate(doc)
@@ -518,7 +523,7 @@ class ApiView(MethodView):
         return payload
 
 def get_or_create(collection, db, resource, payload):
-    """ Helper for embedded inserts, tries to retreive doc from mongo when all unique fields are
+    """ Helper for embededded inserts, tries to retreive doc from mongo when all unique fields are
     present, tries to insert a new doc when nothing is found or not all uniques are present
 
     Aborts on validation erros """
