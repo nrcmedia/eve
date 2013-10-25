@@ -36,9 +36,8 @@ pre_insert = signalizer.signal('pre-insert')
 # Signal subscription
 
 Context = namedtuple('Context', 'limit offset query embedded projection')
+
 logger = logging.getLogger('mongrest')
-
-
 
 
 def str_to_date(string):
@@ -46,6 +45,7 @@ def str_to_date(string):
 
     :param string: the RFC-1123 string to convert to datetime value.
     """
+    # @TODO Try this and raise value error when it fails
     return datetime.strptime(string, app.config['DATE_FORMAT']) if string else None
 
 def document_link(resource, doc_id=None):
@@ -525,6 +525,8 @@ def get_or_create(collection, db, resource, payload):
 
     schema = app.config['DOMAIN'][resource]['schema']
     uniques = [key for key in schema if schema[key].get('unique')]
+
+    print all(k in payload for k in uniques)
 
     if all(k in payload for k in uniques):
         uniq_values = dict( (k, v) for (k, v) in payload.iteritems()
