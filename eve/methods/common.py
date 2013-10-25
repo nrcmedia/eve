@@ -380,6 +380,7 @@ class ApiView(MethodView):
                     find_args.append({})
                 find_args.append(params.projection)
 
+            print find_args
             cursor = self.collection.find(*find_args)\
                         .skip(params.offset).limit(params.limit)
 
