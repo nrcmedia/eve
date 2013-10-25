@@ -258,6 +258,7 @@ def _prep_query(query):
     def convert_datetimes(q):
         for key, val in q.iteritems():
             if isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", val):
+                print 'matched it!'
                 q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S")
             if isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}", val):
                 q[key] = datetime.strptime(val, "%Y-%m-%d")
@@ -283,8 +284,8 @@ def get_context():
             dict_or_none(args.get('embedded')),
             dict_or_none(args.get('projection'))
         )
-    except ValueError:
-        abort(400, '{limit} and {offset} must be integers')
+    except ValueError as e:
+        abort(400, e)
 
 
 class Responsy(object):
