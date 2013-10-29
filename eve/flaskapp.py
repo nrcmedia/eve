@@ -67,7 +67,7 @@ class Api(object):
                                     view_func=view_func, methods=['GET',])
             blueprint.add_url_rule(url, view_func=view_func, methods=['POST',])
             blueprint.add_url_rule('%s<%s:%s>' % (url, pk_type, pk), view_func=view_func,
-                                             methods=['GET', 'PATCH', 'DELETE'])
+                                             methods=['GET', 'PATCH', 'DELETE', 'PUT'])
 
         for resource, settings in app.config['DOMAIN'].items():
             base_url = "/%s/" % resource

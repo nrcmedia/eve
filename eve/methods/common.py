@@ -31,6 +31,20 @@ import logging
 import re
 from pymongo.errors import PyMongoError
 
+COMPARISON = [
+    "$gt",
+    "$gte",
+    "$in",
+    "$lt",
+    "$lte",
+    "$ne",
+    "$nin",
+]
+
+ALLOWED = [
+    "producer",
+]
+
 signalizer = Namespace()
 pre_insert = signalizer.signal('pre-insert')
 # Signal subscription
@@ -45,6 +59,7 @@ def str_to_date(string):
     # @TODO Try this and raise value error when it fails
     return datetime.strptime(string, app.config['DATE_FORMAT']) if string else None
 
+
 def document_link(resource, doc_id=None):
     """ Generate an URI for a resource endpoint or individual items """
     url = url_for('eve.%s_api' % resource)
@@ -52,12 +67,12 @@ def document_link(resource, doc_id=None):
         url += str(doc_id)
     return url
 
+
 def _find_objectid_fields(schema):
     """ Find object id fields, or reference fields in schema """
 
     related_keys = {}
     for key, val in schema.iteritems():
-
         if val['type'] == 'objectid':
             related_keys[key] = {'resource': val['data_relation']['collection'],
                 'multi': False, 'schema': app.config['DOMAIN'][val['data_relation']['collection']]['schema']}
@@ -134,17 +149,11 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
 
                     enabled_embedded_fields.append(field)
 
-
-    print 'deze hier:', enabled_embedded_fields
-
     memoize = {}
 
     for document in documents:
         for field in enabled_embedded_fields:
             # Retrieve and serialize the requested document
-
-            print document.get(field)
-
             if not document.get(field):
                 continue
 
@@ -163,7 +172,7 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
             else:
                 if not memoize.get(document[field]):
                     memoize[document[field]] = db[field_definition['data_relation']['collection']].find_one(
-                        **{'_id': document[field]}
+                        {'_id': document[field]}
                     )
                 embedded_doc = memoize[document[field]]
 
@@ -250,8 +259,33 @@ def _pagination_links(resource):
     return links
 
 
+def _prep_query_(schema, query):
+
+    if query is None:
+        return None
+
+    allowed = all(k in ALLOWED for k in query.keys())
+    if not allowed:
+        abort(400)
+
+    def get_type(field, schema):
+        _type = schema[field]['type']
+        if _type == 'list':
+            return schema[field]['schema']['type']
+        return _type
+
+    for field, val in query.iteritems():
+        _type = get_type(field, schema)
+
+        if isinstance(val, dict):
+            operators = val.keys()
+            if operator not in COMPARISON:
+                abort(400)
+
+
 def _prep_query(query):
     """ Prepare mongodb query """
+
     if query is None:
         return None
 
@@ -355,6 +389,7 @@ class ApiView(MethodView):
         # Singals
         pre_insert.connect(ApiView.pre_insert)
 
+
     @staticmethod
     def pre_insert(sender, **kwargs):
         """ Gets called just before inserting the document in the database,
@@ -366,11 +401,10 @@ class ApiView(MethodView):
 
     def get(self, **kwargs):
         """ GET requests """
+        params = get_context()
 
         if all(v is None for v in kwargs.values()):
             # List endpoint when no keyword args
-            params = get_context()
-
             find_args = []
             if params.query:
                 find_args.append(params.query)
@@ -379,7 +413,6 @@ class ApiView(MethodView):
                     find_args.append({})
                 find_args.append(params.projection)
 
-            print find_args
             cursor = self.collection.find(*find_args)\
                         .skip(params.offset).limit(params.limit)
 
@@ -407,27 +440,51 @@ class ApiView(MethodView):
 
             none_match = request.headers.get('If-None-Match')
             doc = self.collection.find_one({'_id': _id})
+            if not doc:
+                abort(404)
 
-            if doc:
-                _finalize_doc(doc, self.reference_keys, self.resource)
-                if none_match and none_match.replace('"','') == doc.get('etag'):
-                    abort(304)
+            # Embedded documents
+            if params.embedded:
+                _resolve_embedded_documents(self.resource, self.db, params.embedded, [doc])
+            _finalize_doc(doc, self.reference_keys, self.resource)
+            if none_match and none_match.replace('"','') == doc.get('etag'):
+                abort(304)
 
-                resp = jsonify(doc)
-                if doc.get('updated_at'):
-                    resp.headers.set('Last-Modified',
-                        doc['updated_at'].strftime("%a, %d %b %Y %H:%M:%S %Z"))
+            resp = jsonify(doc)
+            if doc.get('updated_at'):
+                resp.headers.set('Last-Modified',
+                    doc['updated_at'].strftime("%a, %d %b %Y %H:%M:%S %Z"))
 
-                if doc.get('etag'):
-                    resp.headers.set('ETag', doc['etag'])
+            if doc.get('etag'):
+                resp.headers.set('ETag', doc['etag'])
 
-                return resp, 200
+            return resp, 200
 
-            abort(404)
+    def _parse_embeds(self, payload, embedded, doc):
+        """ POST and PUT requests accept embedded resource """
 
+        for key, embed in embedded.items():
+            if key in payload:
+                # Embedded doc conflicts with the same key in the root doc
+                abort(400, '{%s} present as embedded field and reference')
 
-    def post(self):
-        """ POST request """
+            ref = self.reference_keys[key]
+            if ref['multi']:
+                if not type(embed) is list:
+                    abort(400, '{%s} requires list of values' % key)
+                for item in embed:
+                    _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], item)
+                    if _id:
+                        doc.setdefault(key, [])
+                        doc[key].append(_id)
+            else:
+                _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], embed)
+                if _id:
+                    doc[key] = _id
+
+    def _parse_validate_payload(self, embedded=True):
+        """ Parse and validate payload from the request, optinionally handle embedded
+        resources. Used by POST and PUT requests """
 
         payload = request.get_json(force=True)
         doc = self._parse(payload)
@@ -436,37 +493,27 @@ class ApiView(MethodView):
         # to the validator.
         embedded = doc.pop('_embedded', None)
 
+        # Validation, abort request on any error
         validated = self.validator.validate(doc)
         if not validated:
             abort(400, self.validator.errors)
 
         if embedded and hasattr(embedded, 'items'):
-            for key, embed in embedded.items():
-                if key in payload:
-                    # Embedded doc conflicts with the same key in the root doc
-                    abort(400, '{%s} present as embedded field and reference')
+            self._parse_embeds(payload, embedded, doc)
 
-                ref = self.reference_keys[key]
-                if ref['multi']:
-                    if not type(embed) is list:
-                        abort(400, '{%s} requires list of values' % key)
-                    for item in embed:
-                        _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], item)
-                        if _id:
-                            doc.setdefault(key, [])
-                            doc[key].append(_id)
-                else:
-                    _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], embed)
-                    if _id:
-                        doc[key] = _id
+        return doc
 
 
+    def post(self):
+        """ POST request """
+
+        doc = self._parse_validate_payload(embedded=True)
         pre_insert.send(self, doc=doc)
         try:
             _id = self.collection.insert(doc)
         except PyMongoError as e:
             logger.error('Error executing insert (%s)', e)
-            abort(500, 'Something went horribly wrong')
+            abort(500, 'Something went horribly wrong TT')
         if not _id:
             abort(500)
 
@@ -477,6 +524,24 @@ class ApiView(MethodView):
         # Add Location header
         resp.headers.set('Location', document_link(self.resource, _id))
         return resp, 201
+
+
+    def put(self, **kwargs):
+        """ PUT request """
+
+        _id = kwargs["_id"]
+
+        doc = self._parse_validate_payload(embedded=True)
+        doc["_id"] = _id
+        try:
+            self.collection.save(doc)
+        except PyMongoError as e:
+            logger.error('Error executing insert (%s)', e)
+            abort(500, 'Something went horribly wrong TT')
+
+        _finalize_doc(doc, self.reference_keys, self.resource)
+
+        return jsonify({}), 204
 
 
     def patch(self, **kwargs):
