@@ -45,9 +45,11 @@ ALLOWED = [
     "producer",
 ]
 
+
 signalizer = Namespace()
 pre_insert = signalizer.signal('pre-insert')
-# Signal subscription
+pre_update = signalizer.signal('pre-update')
+
 Context = namedtuple('Context', 'limit offset query embedded projection')
 logger = logging.getLogger('mongrest')
 
@@ -237,9 +239,6 @@ def jsonify(doc):
     renders BSON types to JSON (dates and objectid's) """
 
     indent = None
-    if app.config['JSONIFY_PRETTYPRINT_REGULAR'] \
-       and not request.is_xhr:
-        indent = 2
     return app.response_class(json.dumps(doc,
         indent=indent, cls=APIEncoder), mimetype='application/json',
         content_type='application/json')
@@ -361,7 +360,7 @@ def set_auth(methods, decorator):
     return decorate
 
 
-@set_auth(('get', 'post', 'patch'), requires_auth)
+@set_auth(('get', 'post', 'patch', 'put'), requires_auth)
 class ApiView(MethodView):
     """ Pluggable view for RESTful crud operations on mongo collections,
     All the HTTP methods go here """
@@ -398,6 +397,49 @@ class ApiView(MethodView):
         doc = kwargs.get('doc')
         if doc:
             _add_timers(doc)
+
+    def _parse_validate_payload(self, embedded=True):
+        """ Parse and validate payload from the request, optinionally handle embedded
+        resources. Used by POST and PUT requests """
+
+        payload = request.get_json(force=True)
+        doc = self._parse(payload)
+
+        # Pluck '_embedded' from the doc before passing the doc
+        # to the validator.
+        embedded = doc.pop('_embedded', None)
+
+        # Validation, abort request on any error
+        validated = self.validator.validate(doc)
+        if not validated:
+            abort(400, self.validator.errors)
+
+        if embedded and hasattr(embedded, 'items'):
+            self._parse_embeds(payload, embedded, doc)
+
+        return doc
+
+    def _parse_embeds(self, payload, embedded, doc):
+        """ POST and PUT requests accept embedded resource """
+
+        for key, embed in embedded.items():
+            if key in payload:
+                # Embedded doc conflicts with the same key in the root doc
+                abort(400, '{%s} present as embedded field and reference')
+
+            ref = self.reference_keys[key]
+            if ref['multi']:
+                if not type(embed) is list:
+                    abort(400, '{%s} requires list of values' % key)
+                for item in embed:
+                    _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], item)
+                    if _id:
+                        doc.setdefault(key, [])
+                        doc[key].append(_id)
+            else:
+                _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], embed)
+                if _id:
+                    doc[key] = _id
 
     def get(self, **kwargs):
         """ GET requests """
@@ -459,49 +501,6 @@ class ApiView(MethodView):
                 resp.headers.set('ETag', doc['etag'])
 
             return resp, 200
-
-    def _parse_embeds(self, payload, embedded, doc):
-        """ POST and PUT requests accept embedded resource """
-
-        for key, embed in embedded.items():
-            if key in payload:
-                # Embedded doc conflicts with the same key in the root doc
-                abort(400, '{%s} present as embedded field and reference')
-
-            ref = self.reference_keys[key]
-            if ref['multi']:
-                if not type(embed) is list:
-                    abort(400, '{%s} requires list of values' % key)
-                for item in embed:
-                    _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], item)
-                    if _id:
-                        doc.setdefault(key, [])
-                        doc[key].append(_id)
-            else:
-                _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], embed)
-                if _id:
-                    doc[key] = _id
-
-    def _parse_validate_payload(self, embedded=True):
-        """ Parse and validate payload from the request, optinionally handle embedded
-        resources. Used by POST and PUT requests """
-
-        payload = request.get_json(force=True)
-        doc = self._parse(payload)
-
-        # Pluck '_embedded' from the doc before passing the doc
-        # to the validator.
-        embedded = doc.pop('_embedded', None)
-
-        # Validation, abort request on any error
-        validated = self.validator.validate(doc)
-        if not validated:
-            abort(400, self.validator.errors)
-
-        if embedded and hasattr(embedded, 'items'):
-            self._parse_embeds(payload, embedded, doc)
-
-        return doc
 
 
     def post(self):
@@ -565,6 +564,7 @@ class ApiView(MethodView):
             resp.headers.set('Content-Location', document_link(self.resource, kwargs['_id']))
             return resp, 204
 
+
     def _parse(self, payload):
         """ Parse incoming request bodies """
 
@@ -621,8 +621,6 @@ def _finalize_doc(doc, reference_keys, resource):
 
     doc['etag'] = document_etag(doc)
     _add_links(doc, reference_keys, resource)
-
-
 
 def _add_timers(doc):
     """ Populates computed datetime fields """
