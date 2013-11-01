@@ -51,6 +51,7 @@ pre_insert = signalizer.signal('pre-insert')
 pre_update = signalizer.signal('pre-update')
 
 Context = namedtuple('Context', 'limit offset query embedded projection')
+
 logger = logging.getLogger('mongrest')
 
 def str_to_date(string):
@@ -216,6 +217,7 @@ def abort(status_code, body=None, headers={}):
     """
     Content negiate the error response.
     """
+    logger.debug('ABORT %s: %s' % (status_code, json.dumps(body)))
 
     if 'text/html' in request.headers.get("Accept", ""):
         error_cls = HTTPException
@@ -505,14 +507,13 @@ class ApiView(MethodView):
 
     def post(self):
         """ POST request """
-
         doc = self._parse_validate_payload(embedded=True)
         pre_insert.send(self, doc=doc)
         try:
             _id = self.collection.insert(doc)
         except PyMongoError as e:
-            logger.error('Error executing insert (%s)', e)
-            abort(500, 'Something went horribly wrong TT')
+            logger.error('Error executing insert: %s', e)
+            abort(500, 'Something went horribly wrong T.T')
         if not _id:
             abort(500)
 

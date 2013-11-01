@@ -203,7 +203,6 @@ class APIEncoder(json.JSONEncoder):
     This is needed to address the encoding of special values.
     """
     def default(self, obj):
-        print type(obj)
         if isinstance(obj, datetime.datetime):
             # convert any datetime to RFC 1123 format
             return date_to_str(obj)
