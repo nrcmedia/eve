@@ -11,13 +11,9 @@
     :license: BSD, see LICENSE for more details.
 """
 
-import eve
 from flask import Blueprint
-from werkzeug.routing import BaseConverter
-from werkzeug.serving import WSGIRequestHandler
 from eve import default_settings
-from eve.io.mongo import Mongo, Validator
-from eve.methods.common import ApiView
+from routes import ApiView
 from flask.ext.pymongo import PyMongo
 
 class Api(object):
@@ -38,10 +34,6 @@ class Api(object):
 
         blueprint = Blueprint('eve', 'eve', url_prefix=url_prefix)
 
-        resources = {}
-        urls = {}
-        datasources = {}
-
         #blueprint.add_url_rule('/', 'home', view_func=home_endpoint)
 
         def register_api(resource, endpoint, url, pk='_id', pk_type='ObjectId'):
@@ -57,9 +49,4 @@ class Api(object):
             register_api(resource, "%s_api" % resource, base_url, pk='_id')
 
         self.blueprint = blueprint
-
-        app.config['RESOURCES'] = resources
-        app.config['URLS'] = urls
-        app.config['SOURCES'] = datasources
-
         app.register_blueprint(blueprint)
