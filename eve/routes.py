@@ -26,6 +26,7 @@ from bson.errors import InvalidId
 from dateutil.tz import tzlocal
 from eve.signals import pre_insert, pre_update
 from eve.auth import requires_auth, set_auth
+from eve.errors import abort
 import logging
 import re
 import json
