@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from flask import current_app as app, url_for
 import json
 from eve.render import APIEncoder
