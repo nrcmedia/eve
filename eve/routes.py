@@ -288,7 +288,7 @@ def get_or_create(collection, db, resource, payload):
     schema = app.config['DOMAIN'][resource]['schema']
 
     if '_id' in payload.keys():
-        doc = collection.find_one({'_id': payload['_id'], {})
+        doc = collection.find_one({'_id': payload['_id']}, {})
         if doc:
             return doc['_id']
 
