@@ -286,6 +286,12 @@ def get_or_create(collection, db, resource, payload):
     Aborts on validation erros """
 
     schema = app.config['DOMAIN'][resource]['schema']
+
+    if '_id' in payload.keys():
+        doc = collection.find_one({'_id': payload['_id'], {})
+        if doc:
+            return doc['_id']
+
     uniques = [key for key in schema if schema[key].get('unique')]
 
     if uniques and all(k in payload for k in uniques):
