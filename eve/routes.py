@@ -290,7 +290,7 @@ def get_or_create(collection, db, resource, payload):
     print payload
 
     if '_id' in payload.keys():
-        doc = collection.find_one({'_id': payload['_id']}, {})
+        doc = collection.find_one({'_id': ObjectId(payload['_id'])}, {})
         print doc
         if doc:
             return doc['_id']
