@@ -223,6 +223,7 @@ class ApiView(MethodView):
         doc = self._parse_validate_payload(embedded=True)
         doc["_id"] = _id
         try:
+            print doc
             self.collection.save(doc)
         except PyMongoError as e:
             logger.error('Error executing insert (%s)', e)
@@ -254,6 +255,14 @@ class ApiView(MethodView):
             resp.headers.set('Content-Location', document_link(self.resource, kwargs['_id']))
             return resp, 204
 
+    def delete(self, **kwargs):
+        """ DELETE request """
+
+        _id = kwargs["_id"]
+        if self.collection.remove({'_id': _id}):
+            return jsonify({}), 204
+        abort(400, 'Failed to delete')
+ 
 
     def _parse(self, payload):
         """ Parse incoming request bodies """
@@ -287,13 +296,12 @@ def get_or_create(collection, db, resource, payload):
 
     schema = app.config['DOMAIN'][resource]['schema']
 
-    print payload
-
     if '_id' in payload.keys():
         doc = collection.find_one({'_id': ObjectId(payload['_id'])}, {})
-        print doc
         if doc:
             return doc['_id']
+        else:
+            abort('400': {'errors': ['Could not find document with id: %s' % payload['_id']]})
 
     uniques = [key for key in schema if schema[key].get('unique')]
 
