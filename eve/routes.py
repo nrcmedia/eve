@@ -255,6 +255,7 @@ class ApiView(MethodView):
             resp.headers.set('Content-Location', document_link(self.resource, kwargs['_id']))
             return resp, 204
 
+
     def delete(self, **kwargs):
         """ DELETE request """
 
@@ -262,7 +263,7 @@ class ApiView(MethodView):
         if self.collection.remove({'_id': _id}):
             return jsonify({}), 204
         abort(400, 'Failed to delete')
- 
+
 
     def _parse(self, payload):
         """ Parse incoming request bodies """
