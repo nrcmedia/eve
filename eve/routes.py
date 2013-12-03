@@ -302,7 +302,7 @@ def get_or_create(collection, db, resource, payload):
         if doc:
             return doc['_id']
         else:
-            abort('400': {'errors': ['Could not find document with id: %s' % payload['_id']]})
+            abort('400', {'errors': ['Could not find document with id: %s' % payload['_id']]})
 
     uniques = [key for key in schema if schema[key].get('unique')]
 
