@@ -247,7 +247,7 @@ class ApiView(MethodView):
         if not validated:
             return jsonify({'errors': self.validator.errors}), 400
 
-        result = self.collection.update({'_id': kwargs['_id']}, doc)
+        result = self.collection.update({'_id': kwargs['_id']}, {'$set': doc})
         if result.get('updatedExisting') == True:
             # Succesful patch requests return 204 with a pointer to the
             # updated resource.
