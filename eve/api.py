@@ -1,31 +1,19 @@
-# -*- coding: utf-8 -*-
-
-"""
-    eve.flaskapp
-    ~~~~~~~~~~~~
-
-    This module implements the central WSGI application object as a Flask
-    subclass.
-
-    :copyright: (c) 2013 by Nicola Iarocci.
-    :license: BSD, see LICENSE for more details.
-"""
-
 from flask import Blueprint
 from eve import default_settings
 from routes import ApiView
 from flask.ext.pymongo import PyMongo
+from auth import contruct_auth
 
 class Api(object):
-    """ The main Api object, on init it will add all the configured urls to create the
-    endpoints (wrapped in a Blueprint) """
+    """ The main Api object, on init it will add routes for the configured urls to create the
+    endpoints, wrapped in a Blueprint """
 
-    def __init__(self, url_prefix, app=None):
+    def __init__(self, url_prefix, app=None, auth=None):
         self.app = app
         if app is not None:
-            self.init_app(app, url_prefix)
+            self.init_app(app, url_prefix, auth)
 
-    def init_app(self, app, url_prefix):
+    def init_app(self, app, url_prefix, auth):
         self.driver = PyMongo(app)
 
         # Set default api configuration, if not already set by users config
@@ -34,9 +22,11 @@ class Api(object):
 
         blueprint = Blueprint('eve', 'eve', url_prefix=url_prefix)
 
-        #blueprint.add_url_rule('/', 'home', view_func=home_endpoint)
+        def register_api(resource, endpoint, url, pk='_id', pk_type='ObjectId', auth=None):
+            if auth:
+                # add Basic Auth
+                ApiView.decorators = [contruct_auth(auth)]
 
-        def register_api(resource, endpoint, url, pk='_id', pk_type='ObjectId'):
             view_func = ApiView.as_view(endpoint, self.driver, resource)
             blueprint.add_url_rule(url, defaults={pk: None},
                                     view_func=view_func, methods=['GET',])
@@ -46,7 +36,7 @@ class Api(object):
 
         for resource, settings in app.config['DOMAIN'].items():
             base_url = "/%s/" % resource
-            register_api(resource, "%s_api" % resource, base_url, pk='_id')
+            register_api(resource, "%s_api" % resource, base_url, pk='_id', auth=auth)
 
         self.blueprint = blueprint
         app.register_blueprint(blueprint)

@@ -25,7 +25,6 @@ from eve.helpers import str_to_date, jsonify, document_link
 from bson.errors import InvalidId
 from dateutil.tz import tzlocal
 from eve.signals import pre_insert, pre_update
-from eve.auth import requires_auth, set_auth
 from eve.errors import abort
 import logging
 import re
@@ -49,7 +48,6 @@ ALLOWED = [
 Context = namedtuple('Context', 'limit offset query embedded projection sort')
 logger = logging.getLogger('mongrest')
 
-@set_auth(('get', 'post', 'patch', 'put'), requires_auth)
 class ApiView(MethodView):
     """ Pluggable view for RESTful crud operations on mongo collections,
     All the HTTP methods go here """
@@ -74,8 +72,12 @@ class ApiView(MethodView):
         self.date_keys = _find_date_fields(self.schema)
         self.validator = Validator(self.schema, self.db, resource)
 
-        # Singals
+        # Signals
         pre_insert.connect(ApiView.pre_insert)
+
+    @staticmethod
+    def pre(sender, **kwargs):
+        """ Gets called before any request """
 
 
     @staticmethod
@@ -88,14 +90,14 @@ class ApiView(MethodView):
             _add_timers(doc)
 
     def _parse_validate_payload(self, embedded=True):
-        """ Parse and validate payload from the request, optinionally handle embedded
-        resources. Used by POST and PUT requests """
+        """ Parse and validate payload from the request, optinionally handle additional
+        embedded resources. Used by POST and PUT requests """
 
         payload = request.get_json(force=True)
         doc = self._parse(payload)
 
-        # Pluck '_embedded' from the doc before passing the doc
-        # to the validator.
+        # Pluck the '_embedded' key from the object before passing the primary doc
+        # to the validator, we want to validate the embedded resources seperately
         embedded = doc.pop('_embedded', None)
 
         # Validation, abort request on any error
@@ -196,6 +198,7 @@ class ApiView(MethodView):
 
     def post(self):
         """ POST request """
+
         doc = self._parse_validate_payload(embedded=True)
         pre_insert.send(self, doc=doc)
         try:
@@ -292,7 +295,6 @@ class ApiView(MethodView):
 def get_or_create(collection, db, resource, payload):
     """ Helper for embededded inserts, tries to retreive doc from mongo when all unique fields are
     present, tries to insert a new doc when nothing is found or not all uniques are present
-
     Aborts on validation erros """
 
     schema = app.config['DOMAIN'][resource]['schema']
@@ -330,10 +332,12 @@ def _finalize_doc(doc, reference_keys, resource):
     doc['etag'] = document_etag(doc)
     _add_links(doc, reference_keys, resource)
 
+
 def _add_timers(doc):
     """ Populates computed datetime fields """
     doc['updated_at'] = datetime.now(tzlocal())
     doc['created_at'] = datetime.now(tzlocal())
+
 
 def _find_objectid_fields(schema):
     """ Find object id fields, or reference fields in schema """
@@ -528,6 +532,6 @@ def get_context():
             dict_or_none(args.get('projection')),
             dict_or_none(args.get('sort'))
         )
-    except ValueError as e:
+    except Exception as e:
         abort(400, e)
 
