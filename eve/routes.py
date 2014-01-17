@@ -89,9 +89,10 @@ class ApiView(MethodView):
         if doc:
             _add_timers(doc)
 
-    def _parse_validate_payload(self, embedded=True):
+    def _parse_validate_payload(self, parse_embedded=True, patchmode=False):
         """ Parse and validate payload from the request, optinionally handle additional
         embedded resources. Used by POST and PUT requests """
+        print 'well...'
 
         payload = request.get_json(force=True)
         doc = self._parse(payload)
@@ -101,17 +102,18 @@ class ApiView(MethodView):
         embedded = doc.pop('_embedded', None)
 
         # Validation, abort request on any error
-        validated = self.validator.validate(doc)
-        if not validated:
-            abort(400, self.validator.errors)
+        if not patchmode: # @TODO Patchmode entirely skips validation now
+            validated = self.validator.validate(doc)
+            if not validated:
+                abort(400, self.validator.errors)
 
-        if embedded and hasattr(embedded, 'items'):
+        if parse_embedded and hasattr(embedded, 'items'):
             self._parse_embeds(payload, embedded, doc)
 
         return doc
 
     def _parse_embeds(self, payload, embedded, doc):
-        """ POST and PUT requests accept embedded resource """
+        """ POST, PUT and PATCH requests accept embedded resource """
 
         for key, embed in embedded.items():
             if key in payload:
@@ -199,7 +201,7 @@ class ApiView(MethodView):
     def post(self):
         """ POST request """
 
-        doc = self._parse_validate_payload(embedded=True)
+        doc = self._parse_validate_payload(parse_embedded=True)
         pre_insert.send(self, doc=doc)
         try:
             _id = self.collection.insert(doc)
@@ -223,10 +225,9 @@ class ApiView(MethodView):
 
         _id = kwargs["_id"]
 
-        doc = self._parse_validate_payload(embedded=True)
+        doc = self._parse_validate_payload(parse_embedded=True)
         doc["_id"] = _id
         try:
-            print doc
             self.collection.save(doc)
         except PyMongoError as e:
             logger.error('Error executing insert (%s)', e)
@@ -240,15 +241,10 @@ class ApiView(MethodView):
     def patch(self, **kwargs):
         """ PATCH request """
 
-        payload = request.get_json(force=True)
-
         if '_id' not in kwargs:
-            abort(400, 'Please provide an {_id}')
+            abort(400, 'Please provide an `_id`')
 
-        doc = self._parse(payload)
-        validated = self.validator.validate(doc, update=True)
-        if not validated:
-            return jsonify({'errors': self.validator.errors}), 400
+        doc = self._parse_validate_payload(parse_embedded=True, patchmode=True)
 
         result = self.collection.update({'_id': kwargs['_id']}, {'$set': doc})
         if result.get('updatedExisting') == True:
@@ -293,21 +289,27 @@ class ApiView(MethodView):
         return payload
 
 def get_or_create(collection, db, resource, payload):
-    """ Helper for embededded inserts, tries to retreive doc from mongo when all unique fields are
+    """ Helper for embededded inserts, tries to update doc from mongo when all unique fields are
     present, tries to insert a new doc when nothing is found or not all uniques are present
-    Aborts on validation erros """
+    When the primary key is present in the paload, try to update the doc.
+    Aborts on validation errors """
 
     schema = app.config['DOMAIN'][resource]['schema']
 
     if '_id' in payload.keys():
         doc = collection.find_one({'_id': ObjectId(payload['_id'])}, {})
-        if doc:
-            return doc['_id']
-        else:
-            abort('400', {'errors': ['Could not find document with id: %s' % payload['_id']]})
+        if not doc:
+            abort('400', {'errors': ['Could not find embedded document with id: %s' % payload['_id']]})
+
+        # v = Validator(schema, db, resource)
+        # validated = v.validate(payload)
+        doc_set = payload
+        del doc_set['_id']
+        print doc_set
+        collection.update({'_id': doc['_id']}, {'$set': doc_set})
+        return doc['_id']
 
     uniques = [key for key in schema if schema[key].get('unique')]
-
     if uniques and all(k in payload for k in uniques):
         uniq_values = dict( (k, v) for (k, v) in payload.iteritems()
                         if k in uniques)

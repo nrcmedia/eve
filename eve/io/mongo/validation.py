@@ -48,7 +48,8 @@ class Validator(Validator):
         """ Validate method to be invoked when performing an update, not an
         insert.
 
-        :param document: the document to be validated.
+        :
+        aram document: the document to be validated.
         :param object_id: the unique id of the document.
         """
         self.object_id = object_id
