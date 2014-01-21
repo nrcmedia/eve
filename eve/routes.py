@@ -74,10 +74,15 @@ class ApiView(MethodView):
 
         # Signals
         pre_insert.connect(ApiView.pre_insert)
+        pre_update.connect(ApiView.pre_update)
 
     @staticmethod
-    def pre(sender, **kwargs):
-        """ Gets called before any request """
+    def _pre_insert_update(sender, **kwargs):
+        """ Gets after the parsing the payload in POST/PUT requests,
+        add computed fields here """
+        doc = kwargs.get('doc')
+        if doc:
+            _add_timers(doc)
 
 
     @staticmethod
@@ -85,9 +90,15 @@ class ApiView(MethodView):
         """ Gets called just before inserting the document in the database,
         useful for adding timestamps """
 
-        doc = kwargs.get('doc')
-        if doc:
-            _add_timers(doc)
+        ApiView._pre_insert_update(sender, **kwargs)
+
+
+    @staticmethod
+    def pre_update(sender, **kwargs):
+        """ Called after PUT payload is parsed """
+
+        ApiView._pre_insert_update(sender, **kwargs)
+
 
     def _parse_validate_payload(self, parse_embedded=True, patchmode=False):
         """ Parse and validate payload from the request, optinionally handle additional
@@ -226,6 +237,8 @@ class ApiView(MethodView):
         _id = kwargs["_id"]
 
         doc = self._parse_validate_payload(parse_embedded=True)
+        pre_update.send(self, doc=doc)
+
         doc["_id"] = _id
         try:
             self.collection.save(doc)
@@ -337,8 +350,10 @@ def _finalize_doc(doc, reference_keys, resource):
 
 def _add_timers(doc):
     """ Populates computed datetime fields """
+
     doc['updated_at'] = datetime.now(tzlocal())
-    doc['created_at'] = datetime.now(tzlocal())
+    if not doc.get('created_at'):
+        doc['created_at'] = datetime.now(tzlocal())
 
 
 def _find_objectid_fields(schema):
