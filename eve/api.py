@@ -1,6 +1,6 @@
 from flask import Blueprint
 from eve import default_settings
-
+from eve.helpers import jsonify, document_link
 from routes import ApiView
 from flask.ext.pymongo import PyMongo
 from auth import contruct_auth
@@ -19,6 +19,7 @@ class Api(object):
 
     def init_app(self, app, url_prefix, auth):
         self.db = PyMongo(app)
+        app.db = self.db
 
         # Set default api configuration, if not already set by users config
         for key in dir(default_settings):

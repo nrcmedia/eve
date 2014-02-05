@@ -48,6 +48,15 @@ ALLOWED = [
 Context = namedtuple('Context', 'limit offset query embedded projection sort')
 logger = logging.getLogger('mongrest')
 
+class RequestContext(object):
+    def __init__(self, limit, offset, query, embedded, projection, sort):
+        self.limit = limit
+        self.offset = offset
+        self.query = query
+        self.embedded = embedded
+        self.projection = projection
+        self.sort = sort
+
 class ApiView(MethodView):
     """ Pluggable view for RESTful crud operations on mongo collections,
     All the HTTP methods go here """
@@ -59,7 +68,7 @@ class ApiView(MethodView):
         this view provides the API endpoints
 
         @TODO Mongo operations could use a wrapper
-        @TODO Auth
+        @TODO http://flask.pocoo.org/docs/patterns/apierrors/
         """
 
         super(ApiView, self).__init__(*args, **kwargs)
@@ -103,7 +112,6 @@ class ApiView(MethodView):
     def _parse_validate_payload(self, parse_embedded=True, patchmode=False):
         """ Parse and validate payload from the request, optinionally handle additional
         embedded resources. Used by POST and PUT requests """
-        print 'well...'
 
         payload = request.get_json(force=True)
         doc = self._parse(payload)
@@ -145,9 +153,9 @@ class ApiView(MethodView):
                 if _id:
                     doc[key] = _id
 
-    def get(self, **kwargs):
+    def get(self, context=None, **kwargs):
         """ GET requests """
-        params = get_context()
+        params = context or get_context()
 
         if all(v is None for v in kwargs.values()):
             # List endpoint when no keyword args
@@ -278,7 +286,7 @@ class ApiView(MethodView):
 
 
     def _parse(self, payload):
-        """ Parse incoming request bodies """
+        """ Parse incoming request payloads """
 
         # Object id field strings to ObjectId instances
         if payload.get('_id'):
@@ -541,7 +549,7 @@ def get_context():
     dict_or_none = lambda x: json.loads(x) if x is not None else None
 
     try:
-        return Context(
+        return RequestContext(
             int_or_none(args.get('limit')) or 25,
             int_or_none(args.get('offset')) or 0,
             _prep_query(dict_or_none(args.get('q'))),
