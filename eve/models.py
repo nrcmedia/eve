@@ -1,9 +1,14 @@
 from collections import MutableSequence
 from pymongo import MongoClient
 import datetime
+from bson import objectid
+from bson.errors import InvalidId
 
 client = MongoClient()
 db = client.test_database
+
+class ValidationError(Exception):
+    pass
 
 def settings(**kwargs):
     """ Decorater to populate the `_settings` attribute of a definition class
@@ -17,8 +22,8 @@ def settings(**kwargs):
     return setit
 
 class MutableArray(MutableSequence):
-    """ Strongly typed container which acts like a list
-    All the regular list operations are supported """
+    """ Strongly typed container class which acts like a list
+    all the usual list operations are supported """
 
     def __init__(self, item_setter, data=None, ):
         self.item_setter = item_setter
@@ -28,10 +33,19 @@ class MutableArray(MutableSequence):
             if hasattr(data, '__iter__'):
                 self.extend(data)
             else:
-                raise TypeError("%s is not an iterable sequence" % repr(data))
+                raise TypeError("`%s` is not an iterable sequence" % repr(data))
+
+    def set(self, value):
+        if callable(self.item_setter):
+            prop = self.item_setter(value)
+        else:
+            prop = self.item_setter
+            for key, val in value.iteritems():
+                setattr(prop, key, val)
+        return prop
 
     def __setitem__(self, index, value):
-        self._list[index] = self.item_setter(value)
+        self._list[index] = self.set(value)
 
     def __getitem__(self, index):
         return self._list[index]
@@ -46,9 +60,13 @@ class MutableArray(MutableSequence):
         return str(self._list)
 
     def insert(self, index, value):
-        self._list.insert(index, self.item_setter(value))
+        print value
+        self._list.insert(index, self.set(value))
 
 class Field(object):
+    def __init__(self, required=False):
+        self.required = required
+
     def __call__(self, value):
         raise NotImplemented("Override this method")
 
@@ -58,13 +76,14 @@ class Double(Field):
 
 class String(Field):
     def __call__(self, value):
+        if not isinstance(value, basestring):
+            raise TypeError("`%s` is not an instance of basestring" % repr(value))
         return value
 
 class Array(Field):
     def __init__(self, contains):
-        # @TODO Check for base class Field
-        if type(contains) not in (String, Integer):
-            raise TypeError("Please choose a suitable field type")
+        if not isinstance(contains, (Field, Base)):
+            raise TypeError("Please choose a suitable field type for this container")
         self.item_setter = contains
 
     def __call__(self, values):
@@ -74,8 +93,13 @@ class Array(Field):
 class Binary(Field):
     pass
 
+
 class ObjectId(Field):
-    pass
+    def __call__(self, value):
+        try:
+            value = objectid.ObjectId(value)
+        except (InvalidId, TypeError) as e:
+            raise TypeError(e)
 
 class Boolean(Field):
     def __call__(self, value):
@@ -137,22 +161,51 @@ class Base(object):
     """ Base class for the models that represent a scheme
 
     """
-
     __metaclass__ = DocBase
 
     def __init__(self, *args, **kwargs):
         for key, val in kwargs.items():
             setattr(self, key, val)
 
+    @classmethod
+    def setter(cls, prop):
+        if isinstance(prop, Field):
+            return prop
+        elif isinstance(prop, Base):
+            return prop
+
     def __setattr__(self, name, value):
         if name in self._meta.keys():
-            object.__setattr__(self, name, self._meta[name](value))
+            prop = self._meta[name]
+            if isinstance(prop, Field):
+                return object.__setattr__(self, name, self._meta[name](value))
+            elif isinstance(prop, Base):
+                for key, val in value.iteritems():
+                    setattr(prop, key, val)
+                return object.__setattr__(self, name, prop)
+
         elif getattr(self._settings, 'overload', None):
-            object.__setattr__(self, name, value)
+            return object.__setattr__(self, name, value)
         else:
             raise AttributeError("`%s` is not defined on %s, not one of: `%s`" %
                                 (name, repr(self.__class__.__name__),
                                     ', '.join(self._meta.keys())))
+
+    @classmethod
+    def validate(cls, prop, value):
+        try:
+            validator = cls._meta[prop]
+        except KeyError:
+            raise ValidationError('Unknown property `%s` on class `%s`' % (prop, cls.__name__))
+        try:
+            val = validator(value)
+        except TypeError as e:
+            raise ValidationError(e)
+        else:
+            return val
+
+    def __str__(self):
+        return str(self.__dict__)
 
     def insert(self):
         doc = self.serialize()
@@ -171,16 +224,51 @@ class Base(object):
 
 if __name__ == '__main__':
 
+    class Nested(Base):
+        name = String()
+
+    class Block(Base):
+        type = String()
+        content = String()
+        lijst = Array(Nested())
+
     class Aap(Base):
+        test = Block()
+
+        producer = String()
+        external_id = String()
         title = String()
-        keywords = Array(Integer())
+        headline = String()
+        abstract = String()
+        kicker = String()
+        authors = Array(ObjectId())
+        images = Array(ObjectId())
+        publication = ObjectId()
+        keywords = Array(String())
+        genres = Array(String())
+        blocks = Array(Block())
+        page_start = Integer()
+        page_end = Integer()
+        wordcount = Integer()
+        filename = String()
+        content = String()
+        # @TODO urn type would be nice!
+        urn = String()
+        published_at = Date()
+        slug = String()
 
-        class Settings:
-            collection = 'aapjes'
+    aapje = Aap()
+    aapje.title = 'testing'
+    aapje.blocks = [{'content': 'jatoch', 'lijst': [{'name': 'janeetoch'}]}]
+    print aapje
 
+    #Aap.validate('blocks', [1,2])
+    #Aap.validate('genres', ['1', '2', '3'])
+    #Aap.validate('authors', ['52ef8208bfdf2a6712b7fc06'])
+    #Aap.validate('ja toch', 1)
 
-    a = Aap()
-    a.title = 'boe'
-    a.keywords = [1,2,3]
-    a.keywords.append(121)
-    a.insert()
+        #a.title = 'boe'
+    #a.keywords = [1,2,3]
+    #a.keywords.append(121)
+    #a.insert()
+

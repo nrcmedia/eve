@@ -30,6 +30,8 @@ import logging
 import re
 import json
 from pymongo.errors import PyMongoError
+from pprint import pprint
+from collections import defaultdict
 
 COMPARISON = [
     "$gt",
@@ -49,6 +51,9 @@ Context = namedtuple('Context', 'limit offset query embedded projection sort')
 logger = logging.getLogger('mongrest')
 
 class RequestContext(object):
+    """ The request context
+    @see get_context """
+
     def __init__(self, limit, offset, query, embedded, projection, sort):
         self.limit = limit
         self.offset = offset
@@ -146,8 +151,13 @@ class ApiView(MethodView):
                 for item in embed:
                     _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], item)
                     if _id:
+                        # Set the reference list
                         doc.setdefault(key, [])
                         doc[key].append(_id)
+                    else:
+                        # Array order may have changed
+                        pass
+
             else:
                 _id = get_or_create(self.db[ref['resource']], self.db, ref['resource'], embed)
                 if _id:
@@ -196,6 +206,7 @@ class ApiView(MethodView):
 
             none_match = request.headers.get('If-None-Match')
             doc = self.collection.find_one({'_id': _id})
+            print doc.get('authors')
             if not doc:
                 abort(404)
 
@@ -213,6 +224,7 @@ class ApiView(MethodView):
 
             if doc.get('etag'):
                 resp.headers.set('ETag', doc['etag'])
+
 
             return resp, 200
 
@@ -259,21 +271,84 @@ class ApiView(MethodView):
         return jsonify({}), 204
 
 
+    def _parse_execute_patches(self, patches, _id):
+        root_patches = []
+        embedded_patches = {}
+        for patch in patches:
+            parts = patch['path'].split('/')[1:]
+            if parts[0] == '_embedded':
+                collection = parts[1]
+                # @TODO Check if array or single valued field
+                projection = {collection: {'$slice': [int(parts[2]), 1]}, '_id': 1}
+                res = self.collection.find_one({'_id': _id}, projection)
+                ref_id = res[collection][0]
+                embedded_patches.setdefault(collection, defaultdict(list))[ref_id]\
+                    .append({'op': patch.get('op'), 'path': '/' + parts[3], 'value': patch.get('value')})
+            else:
+                root_patches.append(patch)
+        # Try embedded patches first, per document
+        for col, patches in embedded_patches.iteritems():
+            for _id, patches in patches.iteritems():
+                self._patch(col, _id, patches)
+        # Root patches ...
+        if root_patches:
+            self._patch(self.resource, _id, root_patches)
+
+
+    def _patch(self, resource, _id, patches):
+        """
+            @see http://tools.ietf.org/html/draft-ietf-appsawg-json-patch-08
+
+            { "op": "remove", "path": "/a/b/c" },
+            { "op": "add", "path": "/a/b/c", "value": [ "foo", "bar" ] },
+            { "op": "replace", "path": "/a/b/c", "value": 42 },
+
+        """
+        updates = {}
+        patches = self._parse(patches, patchmode=True)
+        schema = app.config['DOMAIN'][resource]['schema']
+
+        for op in patches:
+            prop = op.get('path')
+            # multivalued property?
+            multi = schema[prop]['type'] == 'list'
+            if op.get('op') == 'replace':
+                updates.setdefault('$set', {})[prop] = op.get('value')
+            elif op.get('op') == 'add':
+                if multi:
+                    updates.setdefault('$push', {})[prop] = op.get('value')
+                else:
+                    updates.setdefault('$set', {})[prop] = op.get('value')
+            elif op.get('op') == 'remove':
+                if multi:
+                    updates.setdefault('$pull',{})[prop] = op.get('value')
+                else:
+                    updates.setdefault('$unset',{})[prop] = ''
+
+
+        if not updates:
+            abort(400, 'PATCH requests expects list of operations, none found')
+        result = self.db[resource].update({'_id': _id}, updates)
+        return result.get('updatedExisting') == True
+
+
     def patch(self, **kwargs):
-        """ PATCH request """
+        """ PATCH request
+        """
 
         if '_id' not in kwargs:
-            abort(400, 'Please provide an `_id`')
+            abort(400, 'Please provide the primary key')
 
-        doc = self._parse_validate_payload(parse_embedded=True, patchmode=True)
+        payload = request.get_json(force=True)
 
-        result = self.collection.update({'_id': kwargs['_id']}, {'$set': doc})
-        if result.get('updatedExisting') == True:
-            # Succesful patch requests return 204 with a pointer to the
-            # updated resource.
-            resp = jsonify({})
-            resp.headers.set('Content-Location', document_link(self.resource, kwargs['_id']))
-            return resp, 204
+        self._parse_execute_patches(payload, kwargs['_id'])
+
+        # Succesful patch requests return 204 with a pointer to the
+        # updated resource.
+        resp = jsonify({})
+        # @TODO Shouldn't this be 'Location' ?
+        resp.headers.set('Content-Location', document_link(self.resource, kwargs['_id']))
+        return resp, 204
 
 
     def delete(self, **kwargs):
@@ -285,8 +360,12 @@ class ApiView(MethodView):
         abort(400, 'Failed to delete')
 
 
-    def _parse(self, payload):
+    def _parse(self, payload, patchmode=False):
         """ Parse incoming request payloads """
+
+        if patchmode:
+            patches = payload[:]
+            payload = {op.get('path').split('/')[1]: op.get('value') for op in payload}
 
         # Object id field strings to ObjectId instances
         if payload.get('_id'):
@@ -296,7 +375,10 @@ class ApiView(MethodView):
         try:
             for obj_key in doc_references:
                 if self.reference_keys[obj_key].get('multi'):
-                    payload[obj_key] = [ObjectId(v) for v in payload[obj_key]]
+                    if hasattr(payload[obj_key], '__iter__'):
+                        payload[obj_key] = [ObjectId(v) for v in payload[obj_key]]
+                    else:
+                        payload[obj_key] = ObjectId(payload[obj_key])
                 else:
                     payload[obj_key] = ObjectId(payload[obj_key])
         except (InvalidId, TypeError):
@@ -307,17 +389,27 @@ class ApiView(MethodView):
         for date_key in doc_dates:
             payload[date_key] = str_to_date(payload[date_key])
 
+        if patchmode:
+            for key, value in payload.iteritems():
+                for op in patches:
+                    if key == op.get('path').split('/')[1]:
+                        op['path'] = key
+                        op['value'] = value
+                        break
+
+            return patches
         return payload
 
 def get_or_create(collection, db, resource, payload):
     """ Helper for embededded inserts, tries to update doc from mongo when all unique fields are
     present, tries to insert a new doc when nothing is found or not all uniques are present
-    When the primary key is present in the paload, try to update the doc.
+    When the primary key is present in the payload, try to update the doc.
     Aborts on validation errors """
 
     schema = app.config['DOMAIN'][resource]['schema']
 
     if '_id' in payload.keys():
+        # Primary key is present, try to update this doc
         doc = collection.find_one({'_id': ObjectId(payload['_id'])}, {})
         if not doc:
             abort('400', {'errors': ['Could not find embedded document with id: %s' % payload['_id']]})
@@ -326,18 +418,19 @@ def get_or_create(collection, db, resource, payload):
         # validated = v.validate(payload)
         doc_set = payload
         del doc_set['_id']
-        print doc_set
         collection.update({'_id': doc['_id']}, {'$set': doc_set})
         return doc['_id']
 
     uniques = [key for key in schema if schema[key].get('unique')]
     if uniques and all(k in payload for k in uniques):
+        # Unique values are present, try to find the doc
         uniq_values = dict( (k, v) for (k, v) in payload.iteritems()
                         if k in uniques)
         doc = collection.find_one(uniq_values, {})
         if doc:
             return doc['_id']
 
+    # New instance, try and create it
     v = Validator(schema, db, resource)
     validated = v.validate(payload)
     doc = payload
@@ -524,10 +617,10 @@ def _prep_query(query):
     if query is None:
         return None
 
-    def convert_datetimes(q):
+    def convert_objects(q):
         for key, val in q.iteritems():
             if isinstance(val, dict):
-                q[key] = convert_datetimes(val)
+                q[key] = convert_objects(val)
             #elif isinstance(val, list):
             #    q[key] = [convert_datetimes(v) for v in val]
             elif isinstance(val, basestring) and re.match(r"^[0-9a-fA-F]{24}$", val):
@@ -539,7 +632,7 @@ def _prep_query(query):
                 q[key] = datetime.strptime(val, "%Y-%m-%d")
         return q
 
-    return convert_datetimes(query)
+    return convert_objects(query)
 
 def get_context():
     """ Retreive the URL parameters from the current request context """
