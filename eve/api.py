@@ -5,6 +5,9 @@ from eve.helpers import jsonify, document_link
 from routes import ApiView
 from flask.ext.pymongo import PyMongo
 from auth import contruct_auth
+import logging
+
+logger = logging.getLogger('mongrest')
 
 class JSONRequest(Request):
     def on_json_loading_failed(self, e):
@@ -32,6 +35,11 @@ class Api(object):
             app.config.setdefault(key, getattr(default_settings, key))
 
         blueprint = Blueprint('eve', 'eve', url_prefix=url_prefix)
+
+        @blueprint.app_errorhandler(Exception)
+        def unhandled_exception(e):
+            logger.error(e)
+            abort(500)
 
         def register_api(resource, endpoint, url, pk='_id', pk_type='ObjectId', auth=None):
             if auth:
