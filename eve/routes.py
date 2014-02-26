@@ -50,10 +50,10 @@ ALLOWED = [
 Context = namedtuple('Context', 'limit offset query embedded projection sort')
 logger = logging.getLogger('mongrest')
 
-@app.errorhandler(Exception)
-def unhandled_exception(e):
-    logger.error(e)
-    abort(500)
+#@app.errorhandler(Exception)
+#def unhandled_exception(e):
+#    logger.error(e)
+#   abort(500)
 
 class RequestContext(object):
     """ The request context
