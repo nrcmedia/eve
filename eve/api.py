@@ -38,7 +38,7 @@ class Api(object):
 
         @blueprint.app_errorhandler(Exception)
         def unhandled_exception(e):
-            logger.error(e)
+            logger.exception(e)
             abort(500)
 
         def register_api(resource, endpoint, url, pk='_id', pk_type='ObjectId', auth=None):
