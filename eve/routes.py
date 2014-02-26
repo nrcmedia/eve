@@ -118,7 +118,10 @@ class ApiView(MethodView):
         """ Parse and validate payload from the request, optinionally handle additional
         embedded resources. Used by POST and PUT requests """
 
-        payload = request.get_json(force=True)
+        if not request.is_json:
+            abort(400, 'No valid Content-Type')
+
+        payload = request.get_json()
         doc = self._parse(payload)
 
         # Pluck the '_embedded' key from the object before passing the primary doc
@@ -206,7 +209,6 @@ class ApiView(MethodView):
 
             none_match = request.headers.get('If-None-Match')
             doc = self.collection.find_one({'_id': _id})
-            print doc.get('authors')
             if not doc:
                 abort(404)
 
@@ -335,11 +337,12 @@ class ApiView(MethodView):
     def patch(self, **kwargs):
         """ PATCH request
         """
-
         if '_id' not in kwargs:
             abort(400, 'Please provide the primary key')
 
-        payload = request.get_json(force=True)
+        if not request.is_json:
+            abort(400, 'No valid Content-Type')
+        payload = request.get_json()
 
         self._parse_execute_patches(payload, kwargs['_id'])
 
@@ -362,6 +365,8 @@ class ApiView(MethodView):
 
     def _parse(self, payload, patchmode=False):
         """ Parse incoming request payloads """
+        if type(payload) not in (dict, list):
+            abort(400, "Provide a valid JSON object")
 
         if patchmode:
             patches = payload[:]

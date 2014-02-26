@@ -1,9 +1,14 @@
-from flask import Blueprint
+from flask import Blueprint, Request
 from eve import default_settings
+from eve.errors import abort
 from eve.helpers import jsonify, document_link
 from routes import ApiView
 from flask.ext.pymongo import PyMongo
 from auth import contruct_auth
+
+class JSONRequest(Request):
+    def on_json_loading_failed(self, e):
+        abort(400, 'Not supported mime type or invalid message')
 
 
 class Api(object):
@@ -20,6 +25,7 @@ class Api(object):
     def init_app(self, app, url_prefix, auth):
         self.db = PyMongo(app)
         app.db = self.db
+        app.request_class = JSONRequest
 
         # Set default api configuration, if not already set by users config
         for key in dir(default_settings):
