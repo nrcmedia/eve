@@ -110,6 +110,13 @@ class TestMinimal(unittest.TestCase):
         response = self.parse_response(r)
         self.assertTrue(response is not None)
 
+    def test_post_with_id(self):
+        endpoint = '/articles/'
+        data = {
+            '_id': ''
+        }
+        r = self.post(endpoint, data)
+        print r.get_data()
 
     def test_post_known_endpoint(self):
         endpoint = '/articles/'
