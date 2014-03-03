@@ -274,10 +274,14 @@ class ApiView(MethodView):
 
 
     def _parse_execute_patches(self, patches, _id):
+        patches = self._parse(patches, patchmode=True)
         root_patches = []
         embedded_patches = {}
         for patch in patches:
-            parts = patch['path'].split('/')[1:]
+            print patch
+            parts = patch['path'].split('.')
+            print parts
+
             if parts[0] == '_embedded':
                 collection = parts[1]
                 # @TODO Check if array or single valued field
@@ -307,13 +311,14 @@ class ApiView(MethodView):
 
         """
         updates = {}
-        patches = self._parse(patches, patchmode=True)
         schema = app.config['DOMAIN'][resource]['schema']
 
         for op in patches:
             prop = op.get('path')
-            # multivalued property?
-            multi = schema[prop]['type'] == 'list'
+
+            # multivalued property? Does not work on nested stuff
+            multi = schema[prop.split('.')[0]]['type'] == 'list'
+
             if op.get('op') == 'replace':
                 updates.setdefault('$set', {})[prop] = op.get('value')
             elif op.get('op') == 'add':
@@ -337,6 +342,7 @@ class ApiView(MethodView):
     def patch(self, **kwargs):
         """ PATCH request
         """
+
         if '_id' not in kwargs:
             abort(400, 'Please provide the primary key')
 
@@ -370,7 +376,7 @@ class ApiView(MethodView):
 
         if patchmode:
             patches = payload[:]
-            payload = {op.get('path').split('/')[1]: op.get('value') for op in payload}
+            payload = { op.get('path').split('/')[1]: op.get('value') for op in payload}
 
         # Object id field strings to ObjectId instances
         if payload.get('_id'):
@@ -398,8 +404,8 @@ class ApiView(MethodView):
             for key, value in payload.iteritems():
                 for op in patches:
                     if key == op.get('path').split('/')[1]:
-                        op['path'] = key
                         op['value'] = value
+                        op['path'] = '.'.join(op.get('path').split('/')[1:])
                         break
 
             return patches
