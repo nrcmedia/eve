@@ -23,6 +23,7 @@ from functools import wraps
 from eve.io.mongo import Validator
 from eve.helpers import str_to_date, jsonify, document_link
 from bson.errors import InvalidId
+from bson.son import SON
 from dateutil.tz import tzlocal
 from eve.signals import pre_insert, pre_update
 from eve.errors import abort
@@ -54,13 +55,14 @@ class RequestContext(object):
     """ The request context
     @see get_context """
 
-    def __init__(self, limit, offset, query, embedded, projection, sort):
+    def __init__(self, limit, offset, query, embedded, projection, sort, aggregate):
         self.limit = limit
         self.offset = offset
         self.query = query
         self.embedded = embedded
         self.projection = projection
         self.sort = sort
+        self.aggregate = aggregate
 
 class ApiView(MethodView):
     """ Pluggable view for RESTful crud operations on mongo collections,
@@ -180,12 +182,27 @@ class ApiView(MethodView):
                     find_args.append({})
                 find_args.append(params.projection)
 
-            cursor = self.collection.find(*find_args)\
-                        .skip(params.offset).limit(params.limit)
+            if params.aggregate:
+                aggr = params.aggregate
+                aggr_pipes = {}
+                for i, part in enumerate(aggr):
+                    aggr_pipes[part.keys()[0]] = i
+                # pymongo expects SON object for $sort param
+                if '$sort' in aggr_pipes.keys():
+                    aggr[aggr_pipes['$sort']] = {'$sort': SON([tuple(p) for p in aggr[aggr_pipes['$sort']]['$sort']])}
+                # Enforce upper limit when no limit is set in the aggregration
+                if '$limit' not in aggr_pipes.keys():
+                    aggr.append({'$limit': 25}) # @TODO should inherit from settings
+
+                cursor = self.collection.aggregate(aggr, cursor={})
+            else:
+                cursor = self.collection.find(*find_args)\
+                            .skip(params.offset).limit(params.limit)
             if params.sort:
                 cursor.sort(params.sort.items())
 
             documents = list(cursor)
+            print documents
             # Embedded documents
             if params.embedded:
                 _resolve_embedded_documents(self.resource, self.db, params.embedded, documents)
@@ -659,7 +676,8 @@ def get_context():
             _prep_query(dict_or_none(args.get('q'))),
             dict_or_none(args.get('embedded')),
             dict_or_none(args.get('projection')),
-            dict_or_none(args.get('sort'))
+            dict_or_none(args.get('sort')),
+            dict_or_none(args.get('aggregate'))
         )
     except Exception as e:
         abort(400, e)
