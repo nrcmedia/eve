@@ -202,13 +202,12 @@ class ApiView(MethodView):
                 cursor.sort(params.sort.items())
 
             documents = list(cursor)
-            print documents
             # Embedded documents
             if params.embedded:
                 _resolve_embedded_documents(self.resource, self.db, params.embedded, documents)
 
             for doc in documents:
-                _finalize_doc(doc, self.reference_keys, self.resource)
+                _finalize_doc(doc, self.reference_keys, self.resource, etag=False)
 
             # Add paginated links
             links = _pagination_links(self.resource)
@@ -470,10 +469,10 @@ def get_or_create(collection, db, resource, payload):
     abort('400', {'errors': v.errors})
 
 
-def _finalize_doc(doc, reference_keys, resource):
+def _finalize_doc(doc, reference_keys, resource, etag = True):
     """ Adds link and etag to the document """
-
-    doc['etag'] = document_etag(doc)
+    if etag:
+        doc['etag'] = document_etag(doc)
     _add_links(doc, reference_keys, resource)
 
 
@@ -551,7 +550,6 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
     # For each field, is the field allowed to be embedded?
     # Pick out fields that have a `data_relation` where `embeddable=True`
     enabled_embedded_fields = []
-
     config = app.config
 
     for field in embedded_fields:
@@ -566,39 +564,56 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
 
                     enabled_embedded_fields.append(field)
 
-    memoize = {}
-
-    for document in documents:
+    replace = defaultdict(list)
+    _ids = {}
+    for i, document in enumerate(documents):
         for field in enabled_embedded_fields:
             # Retrieve and serialize the requested document
             if not document.get(field):
                 continue
 
             field_definition = config['DOMAIN'][resource]['schema'][field]
-
-            if type(document[field]) is list:
-                key = "".join([str(_id) for _id in document[field]])
-                if not memoize.get(key):
-                    query = {'$or': [
-                        {'_id': id_} for id_ in document[field]
-                    ]}
-                    memoize[key] = [doc for doc in db[field_definition['schema']['data_relation']['collection']].find(
-                        query
-                    )]
-                embedded_doc = memoize[key]
+            if field_definition['type'] == 'list':
+                collection_name = field_definition['schema']['data_relation']['collection']
             else:
-                if not memoize.get(document[field]):
-                    memoize[document[field]] = db[field_definition['data_relation']['collection']].find_one(
-                        {'_id': document[field]}
-                    )
-                embedded_doc = memoize[document[field]]
+                collection_name = field_definition['data_relation']['collection']
 
-            if embedded_doc:
-                document.setdefault("_embedded", {})
-                document['_embedded'][field] = embedded_doc
-                del document[field]
+            _ids.setdefault(collection_name, list())
+
+            if hasattr(document[field], '__iter__') and\
+                hasattr(document[field], '__getitem__'):
+                _ids[collection_name].extend(document[field])
+                for _id in document[field]:
+                    replace[str(_id)].append((i, field, field_definition['type']))
+            else: # assuming single value
+                _ids[collection_name].append(document[field])
+                replace[str(document[field])].append((i, field, field_definition['type']))
+
+            del document[field]
 
 
+    embedded_docs = {}
+    for collection_name, idlst in _ids.iteritems():
+        # Mongodb docs recommend using the $in operator over the $or operator
+        # @see http://docs.mongodb.org/manual/reference/operator/query/or/#_S_or%22
+        results = db[collection_name].find({'_id': {'$in': list(set(idlst))}})
+        embedded_docs.update({str(doc['_id']): doc for doc in results})
+
+    if not embedded_docs:
+        return
+
+    # Attach the embedded docs to their parents
+    for idstr, doc in embedded_docs.iteritems():
+        toreplace = replace.get(idstr)
+        if toreplace:
+            for r in toreplace:
+                if '_embedded' not in documents[r[0]]:
+                    documents[r[0]]['_embedded'] = dict()
+                if r[2] == 'list':
+                    documents[r[0]]['_embedded']\
+                        .setdefault(r[1], []).append(doc)
+                else:
+                    documents[r[0]]['_embedded'][r[1]] = doc
 
 
 def _pagination_links(resource):
