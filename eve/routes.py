@@ -196,6 +196,7 @@ class ApiView(MethodView):
 
                 cursor = self.collection.aggregate(aggr, cursor={})
             else:
+                print find_args
                 cursor = self.collection.find(*find_args)\
                             .skip(params.offset).limit(params.limit)
             if params.sort:
@@ -274,7 +275,8 @@ class ApiView(MethodView):
 
         _id = kwargs["_id"]
 
-        doc = self._parse_validate_payload(parse_embedded=True)
+        # @TODO patchmode totally skips any validation!
+        doc = self._parse_validate_payload(parse_embedded=True, patchmode=True)
         pre_update.send(self, doc=doc)
 
         doc["_id"] = _id
