@@ -25,7 +25,7 @@ from eve.helpers import str_to_date, jsonify, document_link
 from bson.errors import InvalidId
 from bson.son import SON
 from dateutil.tz import tzlocal
-from eve.signals import pre_insert, pre_update
+from eve.signals import pre_insert, pre_update, pre_fetch
 from eve.errors import abort
 import logging
 import re
@@ -112,9 +112,13 @@ class ApiView(MethodView):
     @staticmethod
     def pre_update(sender, **kwargs):
         """ Called after PUT payload is parsed """
-
         ApiView._pre_insert_update(sender, **kwargs)
 
+
+    @staticmethod
+    def after_get(sender, **kwargs):
+        """ """
+        ApiView._pre_insert_update(sender, **kwargs)
 
     def _parse_validate_payload(self, parse_embedded=True, patchmode=False):
         """ Parse and validate payload from the request, optinionally handle additional
@@ -196,7 +200,6 @@ class ApiView(MethodView):
 
                 cursor = self.collection.aggregate(aggr, cursor={})
             else:
-                print find_args
                 cursor = self.collection.find(*find_args)\
                             .skip(params.offset).limit(params.limit)
             if params.sort:
@@ -243,7 +246,6 @@ class ApiView(MethodView):
 
             if doc.get('etag'):
                 resp.headers.set('ETag', doc['etag'])
-
 
             return resp, 200
 
@@ -687,7 +689,7 @@ def get_context():
     dict_or_none = lambda x: json.loads(x) if x is not None else None
 
     try:
-        return RequestContext(
+        context = RequestContext(
             int_or_none(args.get('limit')) or 25,
             int_or_none(args.get('offset')) or 0,
             _prep_query(dict_or_none(args.get('q'))),
@@ -696,6 +698,8 @@ def get_context():
             dict_or_none(args.get('sort')),
             dict_or_none(args.get('aggregate'))
         )
+        pre_fetch.send(context)
+        return context
     except Exception as e:
         abort(400, e)
 

@@ -2,7 +2,7 @@ from datetime import datetime
 from flask import current_app as app, url_for
 import json
 from eve.render import APIEncoder
-
+from eve.signals import pre_render
 
 def document_link(resource, doc_id=None):
     """ Generate an URI for a resource endpoint or individual items """
@@ -24,6 +24,7 @@ def str_to_date(string):
 def jsonify(doc):
     """ Flasks jsonify with a twist, takes document instances and
     renders BSON types to JSON (dates and objectid's) """
+    pre_render.send(doc)
 
     indent = None
     return app.response_class(json.dumps(doc,
