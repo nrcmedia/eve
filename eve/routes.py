@@ -20,7 +20,7 @@ from eve.utils import parse_request, document_etag, config, \
     request_method, debug_error_message
 from bson.objectid import ObjectId
 from functools import wraps
-from eve.io.mongo import Validator
+from eve.io.mongo import Validator, Mongo
 from eve.helpers import str_to_date, jsonify, document_link
 from bson.errors import InvalidId
 from bson.son import SON
@@ -198,6 +198,9 @@ class ApiView(MethodView):
                 if '$limit' not in aggr_pipes.keys():
                     aggr.append({'$limit': 25}) # @TODO should inherit from settings
 
+                # turn RFC-1123 strings into datetime values
+                eve_mongo = Mongo(None)
+                aggr = map(eve_mongo._jsondatetime, aggr)
                 cursor = self.collection.aggregate(aggr, cursor={})
             else:
                 cursor = self.collection.find(*find_args)\
