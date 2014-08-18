@@ -679,7 +679,6 @@ def _prep_query(query):
 
     def convert_objects(q):
         for key, val in q.iteritems():
-            print val
             if isinstance(val, dict):
                 q[key] = convert_objects(val)
             #elif isinstance(val, list):
@@ -691,7 +690,7 @@ def _prep_query(query):
                 q[key] = datetime.strptime(val, "%Y-%m-%d")
             elif isinstance(val, basestring) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val):
                 q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S")
-            elif isinstance(val, basestring) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w$", val):
+            elif isinstance(val, basestring) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w{1,3}$", val):
                 # explicit timezone handling
                 # datetime tz handling is not platform independent, should use other package, val = val.replace(' ', '+')
                 # @TODO for now only support UTC/Z flags for tz
@@ -705,7 +704,6 @@ def get_context():
     """ Retreive the URL parameters from the current request context """
 
     args = request.args
-    print args
     int_or_none = lambda x: int(x) if x is not None else None
     dict_or_none = lambda x: json.loads(x) if x is not None else None
 
