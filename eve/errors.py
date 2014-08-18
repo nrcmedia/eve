@@ -37,7 +37,7 @@ def abort(status_code, body=None, headers={}):
     """
     Content negiate the error response.
     """
-    logger.debug('ABORT %s: %s' % (status_code, json.dumps(body)))
+    logger.debug('ABORT %s' % (status_code))
 
     if 'text/html' in request.headers.get("Accept", ""):
         error_cls = HTTPException

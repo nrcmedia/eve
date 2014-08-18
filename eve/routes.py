@@ -48,7 +48,6 @@ ALLOWED = [
     "producer",
 ]
 
-Context = namedtuple('Context', 'limit offset query embedded projection sort')
 logger = logging.getLogger('mongrest')
 
 class RequestContext(object):
@@ -88,7 +87,7 @@ class ApiView(MethodView):
         self.date_keys = _find_date_fields(self.schema)
         self.validator = Validator(self.schema, self.db, resource)
 
-        # Signals
+        # Subscribe to signals
         pre_insert.connect(ApiView.pre_insert)
         pre_update.connect(ApiView.pre_update)
 
@@ -298,30 +297,9 @@ class ApiView(MethodView):
 
     def _parse_execute_patches(self, patches, _id):
         patches = self._parse(patches, patchmode=True)
-        root_patches = []
-        embedded_patches = {}
-        for patch in patches:
-            print patch
-            parts = patch['path'].split('.')
-            print parts
-
-            if parts[0] == '_embedded':
-                collection = parts[1]
-                # @TODO Check if array or single valued field
-                projection = {collection: {'$slice': [int(parts[2]), 1]}, '_id': 1}
-                res = self.collection.find_one({'_id': _id}, projection)
-                ref_id = res[collection][0]
-                embedded_patches.setdefault(collection, defaultdict(list))[ref_id]\
-                    .append({'op': patch.get('op'), 'path': '/' + parts[3], 'value': patch.get('value')})
-            else:
-                root_patches.append(patch)
-        # Try embedded patches first, per document
-        for col, patches in embedded_patches.iteritems():
-            for _id, patches in patches.iteritems():
-                self._patch(col, _id, patches)
         # Root patches ...
-        if root_patches:
-            self._patch(self.resource, _id, root_patches)
+        if patches:
+            self._patch(self.resource, _id, patches)
 
 
     def _patch(self, resource, _id, patches):
@@ -333,32 +311,63 @@ class ApiView(MethodView):
             { "op": "replace", "path": "/a/b/c", "value": 42 },
 
         """
-        updates = {}
+        updates = defaultdict(dict)
         schema = app.config['DOMAIN'][resource]['schema']
 
-        for op in patches:
-            prop = op.get('path')
+        operations_map = {
+            'remove':   {
+                'single': {
+                    'exists': '$unset',
+                },
+                'multi' : {
+                    'exists': '$pull',
+                },
+            },
+            'add': {
+                'single': {
+                    'exists': '$set',
+                    'new': '$set',
+                },
+                'multi' : {
+                    'exists': '$push',
+                    'new': '$set',
+                },
+            },
+            'replace': {
+                'single': {
+                    'exists': '$set',
+                },
+                'multi': {
+                    'exists': '$set',
+                },
+            },
+        }
 
-            # multivalued property? Does not work on nested stuff
-            multi = schema[prop.split('.')[0]]['type'] == 'list'
+        for operation in patches:
+            prop = operation['path']
+            op = operation['op']
+            value = operation['value']
 
-            if op.get('op') == 'replace':
-                updates.setdefault('$set', {})[prop] = op.get('value')
-            elif op.get('op') == 'add':
-                if multi:
-                    updates.setdefault('$push', {})[prop] = op.get('value')
-                else:
-                    updates.setdefault('$set', {})[prop] = op.get('value')
-            elif op.get('op') == 'remove':
-                if multi:
-                    updates.setdefault('$pull',{})[prop] = op.get('value')
-                else:
-                    updates.setdefault('$unset',{})[prop] = ''
+            # multivalued property? @TODO does not work on nested objects!
+            is_multi = schema[prop.split('.')[0]]['type'] == 'list'
+            exists = self.db[resource].find_one({'_id': _id, prop: {'$exists': True }})
+            db_op_map = operations_map[op]['multi' if is_multi else 'single']
 
+            db_op = db_op_map.get('exists' if exists else 'new')
+            if not db_op:
+                if op == 'remove':
+                    abort(400, 'Cannot remove non existing field: `%s`' % op)
+                elif op == 'replace':
+                    abort(400, 'Cannot replace non existing field: `%s`' % op)
+            else:
+                updates[db_op][prop] = value
 
         if not updates:
+            # @TODO this is a _parse error probably, doesn't belong here
             abort(400, 'PATCH requests expects list of operations, none found')
+
         result = self.db[resource].update({'_id': _id}, updates)
+
         return result.get('updatedExisting') == True
 
 
@@ -387,6 +396,7 @@ class ApiView(MethodView):
         """ DELETE request """
 
         _id = kwargs["_id"]
+        # @TODO Patch is idempotent, so return 204 when item does not exist
         if self.collection.remove({'_id': _id}):
             return jsonify({}), 204
         abort(400, 'Failed to delete')
@@ -396,10 +406,19 @@ class ApiView(MethodView):
         """ Parse incoming request payloads """
         if type(payload) not in (dict, list):
             abort(400, "Provide a valid JSON object")
+        if patchmode and type(payload) is not list:
+            abort(400, "Provide an array of patches")
 
         if patchmode:
-            patches = payload[:]
-            payload = { op.get('path').split('/')[1]: op.get('value') for op in payload}
+            for patch in payload:
+                parts = patch.get('path').split('/')
+                if parts.pop(0) != '':
+                    abort(400, 'Patch path must start with "/"')
+                parts = [part.replace('~1', '/') for part in parts]
+                parts = [part.replace('~0', '~') for part in parts]
+                patch['path'] = '.'.join(parts)
+
+            return payload
 
         # Object id field strings to ObjectId instances
         if payload.get('_id'):
@@ -423,15 +442,6 @@ class ApiView(MethodView):
         for date_key in doc_dates:
             payload[date_key] = str_to_date(payload[date_key])
 
-        if patchmode:
-            for key, value in payload.iteritems():
-                for op in patches:
-                    if key == op.get('path').split('/')[1]:
-                        op['value'] = value
-                        op['path'] = '.'.join(op.get('path').split('/')[1:])
-                        break
-
-            return patches
         return payload
 
 def get_or_create(collection, db, resource, payload):
@@ -676,8 +686,9 @@ def _prep_query(query):
             elif isinstance(val, basestring) and re.match(r"^[0-9a-fA-F]{24}$", val):
                 # @TODO This also matches strings that look like object id's
                 q[key] = ObjectId(val)
-            elif isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", val):
+            elif isinstance(val, basetring) and re.match(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", val):
                 q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S")
+            # @TODO explicit timezone handling
             elif isinstance(val, basestring) and re.match(r"\d{4}-\d{2}-\d{2}", val):
                 q[key] = datetime.strptime(val, "%Y-%m-%d")
         return q

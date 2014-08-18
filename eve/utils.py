@@ -214,7 +214,8 @@ def date_to_str(date):
 
     :param date: the datetime value to convert.
     """
-    return datetime.strftime(date, config.DATE_FORMAT) if date else None
+    # @TODO fix replace for utc/z, use other date module?
+    return datetime.strftime(date, config.DATE_FORMAT).replace('UTC', 'Z') if date else None
 
 
 def collection_link(resource):
