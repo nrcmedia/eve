@@ -24,6 +24,7 @@ from eve.io.mongo import Validator, Mongo
 from eve.helpers import str_to_date, jsonify, document_link
 from bson.errors import InvalidId
 from bson.son import SON
+from bson import json_util
 from dateutil.tz import tzlocal
 from eve.signals import pre_insert, pre_update, pre_fetch
 from eve.errors import abort
@@ -197,9 +198,6 @@ class ApiView(MethodView):
                 if '$limit' not in aggr_pipes.keys():
                     aggr.append({'$limit': 25}) # @TODO should inherit from settings
 
-                # turn RFC-1123 strings into datetime values
-                eve_mongo = Mongo(None)
-                aggr = map(eve_mongo._jsondatetime, aggr)
                 cursor = self.collection.aggregate(aggr, cursor={})
             else:
                 cursor = self.collection.find(*find_args)\
@@ -678,11 +676,12 @@ def _prep_query(query):
         return None
 
     def convert_objects(q):
+        if isinstance(q, list):
+            return [convert_objects(item) for item in q]
+
         for key, val in q.iteritems():
             if isinstance(val, dict):
                 q[key] = convert_objects(val)
-            #elif isinstance(val, list):
-            #    q[key] = [convert_datetimes(v) for v in val]
             elif isinstance(val, basestring) and re.match(r"^[0-9a-fA-F]{24}$", val):
                 # @TODO This also matches strings that look like object id's
                 q[key] = ObjectId(val)
@@ -715,7 +714,7 @@ def get_context():
             dict_or_none(args.get('embedded')),
             dict_or_none(args.get('projection')),
             dict_or_none(args.get('sort')),
-            dict_or_none(args.get('aggregate'))
+            _prep_query(dict_or_none(args.get('aggregate'))),
         )
         pre_fetch.send(context)
         return context
