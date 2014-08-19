@@ -36,11 +36,11 @@ class Api(object):
 
         blueprint = Blueprint('eve', 'eve', url_prefix=url_prefix)
 
-        if not app.debug:
-            @blueprint.app_errorhandler(Exception)
-            def unhandled_exception(e):
-                logger.exception(e)
-                abort(500)
+        # if not app.debug:
+        #     @blueprint.app_errorhandler(Exception)
+        #     def unhandled_exception(e):
+        #         logger.exception(e)
+        #         abort(500)
 
         def register_api(resource, endpoint, url, pk='_id', pk_type='ObjectId', auth=None):
             if auth:
