@@ -21,7 +21,7 @@ from eve.utils import parse_request, document_etag, config, \
 from bson.objectid import ObjectId
 from functools import wraps
 from eve.io.mongo import Validator, Mongo
-from eve.helpers import str_to_date, jsonify, document_link
+from eve.helpers import jsonify, document_link
 from bson.errors import InvalidId
 from bson.son import SON
 from bson import json_util
@@ -34,6 +34,7 @@ import json
 from pymongo.errors import PyMongoError
 from pprint import pprint
 from collections import defaultdict
+from dateutil import parser
 
 COMPARISON = [
     "$gt",
@@ -256,6 +257,7 @@ class ApiView(MethodView):
         doc = self._parse_validate_payload(parse_embedded=True)
         pre_insert.send(self, doc=doc)
         try:
+            print 'inserting', doc
             _id = self.collection.insert(doc)
         except PyMongoError as e:
             logger.error('Error executing insert: %s', e)
@@ -265,6 +267,7 @@ class ApiView(MethodView):
 
         # Add the id to the payload
         doc['_id'] = _id
+        print 'doc', doc
         _finalize_doc(doc, self.reference_keys, self.resource)
         resp = jsonify(doc)
         # Add Location header
@@ -436,10 +439,7 @@ class ApiView(MethodView):
             abort(400, 'Reference fields should be 24 char hex strings')
 
         # Date strings to datetime objects
-        doc_dates = self.date_keys.intersection(payload.keys())
-        for date_key in doc_dates:
-            payload[date_key] = str_to_date(payload[date_key])
-
+        payload = _prep_query(payload)
         return payload
 
 def get_or_create(collection, db, resource, payload):
@@ -680,21 +680,19 @@ def _prep_query(query):
             return [convert_objects(item) for item in q]
 
         for key, val in q.iteritems():
+            print val
             if isinstance(val, dict):
                 q[key] = convert_objects(val)
             elif isinstance(val, basestring) and re.match(r"^[0-9a-fA-F]{24}$", val):
                 # @TODO This also matches strings that look like object id's
                 q[key] = ObjectId(val)
-            elif isinstance(val, basestring) and re.match(r"^\d{4}-\d{2}-\d{2}$", val):
-                q[key] = datetime.strptime(val, "%Y-%m-%d")
-            elif isinstance(val, basestring) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val):
-                q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S")
-            elif isinstance(val, basestring) and re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w{1,3}$", val):
-                # explicit timezone handling
-                # datetime tz handling is not platform independent, should use other package, val = val.replace(' ', '+')
-                # @TODO for now only support UTC/Z flags for tz
-                if val[-1] == 'Z': val = val[:-1] + 'UTC'
-                q[key] = datetime.strptime(val, "%Y-%m-%dT%H:%M:%S%Z")
+            elif isinstance(val, basestring) and (
+                re.match(r"^\d{4}-\d{2}-\d{2}$", val) or
+                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val) or
+                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w{1,3}$", val) or
+                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\s\d{2}:\d{2}$", val)):
+                q[key] = parser.parse(val)
+
         return q
 
     return convert_objects(query)
