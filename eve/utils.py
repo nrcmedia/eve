@@ -19,6 +19,7 @@ from bson.json_util import dumps
 import werkzeug.exceptions
 from werkzeug.exceptions import default_exceptions, HTTPException
 import json
+from time import mktime
 
 
 class JSONHTTPException(HTTPException):
@@ -214,8 +215,11 @@ def date_to_str(date):
 
     :param date: the datetime value to convert.
     """
-    # @TODO fix replace for utc/z, use other date module?
-    return datetime.strftime(date, config.DATE_FORMAT).replace('UTC', 'Z') if date else None
+    if not date:
+        return None
+    epoch = mktime(datetime.utctimetuple(date))
+    _date = datetime.fromtimestamp(epoch)
+    return datetime.strftime(_date, config.DATE_FORMAT) + 'Z'
 
 
 def collection_link(resource):

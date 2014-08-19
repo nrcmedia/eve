@@ -257,7 +257,6 @@ class ApiView(MethodView):
         doc = self._parse_validate_payload(parse_embedded=True)
         pre_insert.send(self, doc=doc)
         try:
-            print 'inserting', doc
             _id = self.collection.insert(doc)
         except PyMongoError as e:
             logger.error('Error executing insert: %s', e)
@@ -267,7 +266,6 @@ class ApiView(MethodView):
 
         # Add the id to the payload
         doc['_id'] = _id
-        print 'doc', doc
         _finalize_doc(doc, self.reference_keys, self.resource)
         resp = jsonify(doc)
         # Add Location header
@@ -680,7 +678,6 @@ def _prep_query(query):
             return [convert_objects(item) for item in q]
 
         for key, val in q.iteritems():
-            print val
             if isinstance(val, dict):
                 q[key] = convert_objects(val)
             elif isinstance(val, basestring) and re.match(r"^[0-9a-fA-F]{24}$", val):
@@ -689,7 +686,8 @@ def _prep_query(query):
             elif isinstance(val, basestring) and (
                 re.match(r"^\d{4}-\d{2}-\d{2}$", val) or
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val) or
-                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w{1,3}$", val) ):
+                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", val) or
+                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+\s]\d{2}:\d{2}$", val) ):
                 q[key] = parser.parse(val)
 
         return q
