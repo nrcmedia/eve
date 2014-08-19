@@ -689,8 +689,7 @@ def _prep_query(query):
             elif isinstance(val, basestring) and (
                 re.match(r"^\d{4}-\d{2}-\d{2}$", val) or
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val) or
-                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w{1,3}$", val) or
-                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\s\d{2}:\d{2}$", val)):
+                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\w{1,3}$", val) ):
                 q[key] = parser.parse(val)
 
         return q
