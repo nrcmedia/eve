@@ -20,6 +20,7 @@ import werkzeug.exceptions
 from werkzeug.exceptions import default_exceptions, HTTPException
 import json
 from time import mktime
+import calendar
 
 
 class JSONHTTPException(HTTPException):
@@ -210,16 +211,19 @@ def str_to_date(string):
     return datetime.strptime(string, config.DATE_FORMAT) if string else None
 
 
-def date_to_str(date):
+def date_to_str(dateobj):
     """ Converts a datetime value to the corresponding RFC-1123 string.
 
     :param date: the datetime value to convert.
     """
-    if not date:
+    if not dateobj:
         return None
-    epoch = mktime(datetime.utctimetuple(date))
-    _date = datetime.fromtimestamp(epoch)
-    return datetime.strftime(_date, config.DATE_FORMAT) + 'Z'
+
+    if dateobj.utcoffset() is not None:
+        dateobj = dateobj - dateobj.utcoffset()
+    seconds = calendar.timegm(dateobj.timetuple())
+    _dt = datetime.utcfromtimestamp(seconds)
+    return _dt.isoformat() + 'Z'
 
 
 def collection_link(resource):
