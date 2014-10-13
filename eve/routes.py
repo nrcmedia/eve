@@ -34,7 +34,8 @@ import json
 from pymongo.errors import PyMongoError
 from pprint import pprint
 from collections import defaultdict
-from dateutil import parser
+import dateutil.parser
+
 
 COMPARISON = [
     "$gt",
@@ -181,6 +182,7 @@ class ApiView(MethodView):
             # List endpoint when no keyword args
             find_args = []
             if params.query:
+                print params.query
                 find_args.append(params.query)
             if params.projection:
                 if not len(find_args):
@@ -395,7 +397,7 @@ class ApiView(MethodView):
         """ DELETE request """
 
         _id = kwargs["_id"]
-        # @TODO Patch is idempotent, so return 204 when item does not exist
+        # @TODO Patch (?) is idempotent, so return 204 when item does not exist
         if self.collection.remove({'_id': _id}):
             return jsonify({}), 204
         abort(400, 'Failed to delete')
@@ -551,9 +553,9 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
     .. versionadded:: 0.1.0
     """
     # Build the list of fields where embedding is being requested
+    print resource, db, embedded, len(documents)
     try:
-        embedded_fields = [k for k, v in embedded.items()
-                           if v == 1]
+        embedded_fields = [k for k, v in embedded.items() if v]
     except AttributeError:
         # We got something other than a dict
         abort(400, description=debug_error_message(
@@ -576,6 +578,7 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
                 field_definition['schema']['data_relation'].get('embeddable')):
 
                     enabled_embedded_fields.append(field)
+
 
     replace = defaultdict(list)
     _ids = {}
@@ -609,7 +612,16 @@ def _resolve_embedded_documents(resource, db, embedded, documents):
     for collection_name, idlst in _ids.iteritems():
         # Mongodb docs recommend using the $in operator over the $or operator
         # @see http://docs.mongodb.org/manual/reference/operator/query/or/#_S_or%22
-        results = db[collection_name].find({'_id': {'$in': list(set(idlst))}})
+        args = [{'_id': {'$in': list(set(idlst))}}]
+        # We might have an embedded projection defined
+        # @TODO this only works if the collection name is the same as the field name.
+        embed_details = embedded.get(collection_name)
+        if isinstance(embed_details, dict) and embed_details.get('projection'):
+            args.append(embed_details['projection'])
+        results = list(db[collection_name].find(*args))
+        # Allow nested/recursive embeds
+        if isinstance(embed_details, dict) and embed_details.get('embedded'):
+            _resolve_embedded_documents(collection_name, db, embed_details['embedded'], results)
         embedded_docs.update({str(doc['_id']): doc for doc in results})
 
     if not embedded_docs:
@@ -688,7 +700,10 @@ def _prep_query(query):
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val) or
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", val) or
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+\s]\d{2}:\d{2}$", val) ):
-                q[key] = parser.parse(val)
+                _dt = dateutil.parser.parse(val)
+                print _dt
+                #q[key] = _dt.astimezone(dateutil.tz.tzutc())
+                q[key] = _dt
 
         return q
 
