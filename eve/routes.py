@@ -182,7 +182,6 @@ class ApiView(MethodView):
             # List endpoint when no keyword args
             find_args = []
             if params.query:
-                print params.query
                 find_args.append(params.query)
             if params.projection:
                 if not len(find_args):
@@ -418,6 +417,9 @@ class ApiView(MethodView):
                 parts = [part.replace('~1', '/') for part in parts]
                 parts = [part.replace('~0', '~') for part in parts]
                 patch['path'] = '.'.join(parts)
+
+                # @TODO Dirty hack, fix non converted object id's
+                patch = _prep_query(patch)
 
             return payload
 
@@ -701,8 +703,6 @@ def _prep_query(query):
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", val) or
                 re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+\s]\d{2}:\d{2}$", val) ):
                 _dt = dateutil.parser.parse(val)
-                print _dt
-                #q[key] = _dt.astimezone(dateutil.tz.tzutc())
                 q[key] = _dt
 
         return q
