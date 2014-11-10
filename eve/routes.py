@@ -419,6 +419,7 @@ class ApiView(MethodView):
                 patch['path'] = '.'.join(parts)
 
                 # @TODO Dirty hack, fix non converted object id's
+                # print patch
                 patch = _prep_query(patch)
 
             return payload
@@ -684,29 +685,26 @@ def _prep_query_(schema, query):
 def _prep_query(query):
     """ Prepare mongodb query """
 
-    if query is None:
-        return None
-
     def convert_objects(q):
+        if q is None:
+            return q
         if isinstance(q, list):
             return [convert_objects(item) for item in q]
-
-        for key, val in q.iteritems():
-            if isinstance(val, dict):
+        if isinstance(q, dict):
+            for key, val in q.iteritems():
                 q[key] = convert_objects(val)
-            elif isinstance(val, basestring) and re.match(r"^[0-9a-fA-F]{24}$", val):
-                # @TODO This also matches strings that look like object id's
-                q[key] = ObjectId(val)
-            elif isinstance(val, basestring) and (
-                re.match(r"^\d{4}-\d{2}-\d{2}$", val) or
-                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", val) or
-                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", val) or
-                re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+\s]\d{2}:\d{2}$", val) ):
-                _dt = dateutil.parser.parse(val)
-                q[key] = _dt
-
+            return q
+        elif isinstance(q, basestring) and re.match(r"^[0-9a-fA-F]{24}$", q):
+            # @TODO This also matches strings that look like object id's
+            return ObjectId(q)
+        elif isinstance(q, basestring) and (
+            re.match(r"^\d{4}-\d{2}-\d{2}$", q) or
+            re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", q) or
+            re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$", q) or
+            re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+\s]\d{2}:\d{2}$", q) ):
+            _dt = dateutil.parser.parse(q)
+            return _dt
         return q
-
     return convert_objects(query)
 
 def get_context():
